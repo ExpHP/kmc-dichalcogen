@@ -27,7 +27,7 @@ def run(ofile):
 	state = State((100,100))
 	for _ in range(20):
 		performer = kmc.weighted_choice(state.edges())
-		state, info = performer()
+		info = performer(state) # warning: this mutates state
 		json.dump(info, ofile)
 		ofile.write('\n')
 		ofile.flush()

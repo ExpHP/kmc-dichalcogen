@@ -138,40 +138,29 @@ class SimpleState(MSONable):
 	# These enumerate all of the possible events that can happen to the state.
 	# (an event represents one transition across an energy barrier)
 
-	# The purpose of the 'perform' methods is to serve as a callback for
-	# generating the new state.  One will be called AFTER an event has
-	# been selected, and it will produce the new state as a modified copy
-	# of the original state.  It will also generate a serializable dict of
-	# info about the move (including the ids assigned to new defects,
-	# to assist in playback)
+	# The purpose of the 'perform' methods is twofold:
+	#  1. To serve as a callback for generating the new state. One will be
+	#     called AFTER an event has been selected, and it will be passed in
+	#     the current state object (or a copy thereof) to modify in-place.
+	#  2. To construct and return a serializable dict of info about the
+	#     event (enough info for e.g. an animation script to be able to
+	#     "replay" the simulation).
+	# This info dict may contain details that weren't decided until the
+	# 'perform' method was run; hence the double duty.
 
-	# FIXME The signal-to-noise ratio here is terrible.
-	# I tried to organize the logic best I can, but still too many things are
-	# intertwined together; it borders on unreadable.
-	#
-	# The big blockers preventing me from pulling things apart more is:
-	# * (a) Adding entities involves the generation of ids which must be
-	#       unambiguously associated with the items in the output.
-	# * (b) I want to be able to have aggregated events; e.g. combine all events
-	#       for vacancy formation into a single event with total weight N.
-	#       (the selection of a node is then deferred until the event is actually
-	#        chosen in the weighted selection).
-	#       This is trivial to do now, but I'm not sure how it could be done if
-	#        perform() was not responsible for constructing the info() dict.
+	# (note: the primary motivation for having 'perform' mutate the input
+	#  state was just to make the code easier to read... though it also
+	#  sets the stage for incremental status cache updates)
+
+	# FIXME This still looks and feels overengineered. :/
 
 	def __rule__new_vacancy(self):
 		''' Allows new vacancies to form in sites with atoms. '''
-		def perform(layer, node):
-			clone = self.clone()
-			id = clone.__new_vacancy(layer, node)
-			clone.__update_status_cache()
-			return (clone, info(id, layer, node))
+		def perform(layer, node, self):
+			self.__new_vacancy(layer, node)
+			self.__update_status_cache()
 
-		def info(id, layer, node):
-			return {
-				'action': 'create_vacancy', 'id': id,
-				'layer': layer, 'node': node,
-				}
+			return { 'action': 'create_vacancy', 'layer': layer, 'node': node }
 
 		def collect():
 			for (node, status) in self.nodes_with_status():
@@ -182,21 +171,19 @@ class SimpleState(MSONable):
 				elif status is STATUS_TREFOIL_PARTICIPANT: pass
 				else: assert False, 'complete switch'
 
+		# FIXME: honestly the only reason this was written as an inner method
+		# is because it makes the code read better. (any less wtf solution?)
+		# The same goes for all other collect() methods.
 		return collect()
 
 	def __rule__migrate_vacancy(self):
 		''' Allows vacancies to move to adjacent sites. '''
-		def perform(id, dest):
-			clone = self.clone()
-			clone.__vacancies[id]['where'] = tuple(dest)
-			clone.__update_status_cache()
-			return (clone, info(id, dest))
+		def perform(id, dest, self):
+			old = tuple(self.__vacancies[id]['where'])
+			self.__vacancies[id]['where'] = tuple(dest)
+			self.__update_status_cache()
 
-		def info(id, dest):
-			return {
-				'action': 'move_vacancy', 'id': id,
-				'dest': dest,
-			}
+			return { 'action': 'move_vacancy', 'was': old, 'now': dest }
 
 		def collect():
 			for (id, vacancy) in self.vacancies_with_id():
@@ -214,20 +201,14 @@ class SimpleState(MSONable):
 
 	def __rule__create_trefoil(self):
 		''' Allows 3 divacancies to join into a rotated, trefoil defect. '''
-		def perform(vacancy_ids):
-			clone = self.clone()
+		def perform(vacancy_ids, self):
 			vacancy_ids = tuple(vacancy_ids)
-			vacancies = [clone.__vacancies.pop(x) for x in vacancy_ids]
-			id = clone.__new_trefoil(x['where'] for x in vacancies)
+			vacancies = [self.__vacancies.pop(x) for x in vacancy_ids]
+			nodes = [x['where'] for x in vacancies]
+			self.__new_trefoil(nodes)
+			self.__update_status_cache()
 
-			clone.__update_status_cache()
-			return (clone, info(id, vacancy_ids))
-
-		def info(id, vacancy_ids):
-			return {
-				'action': 'create_trefoil', 'trefoil_id': id,
-				'vacancy_ids': vacancy_ids,
-			}
+			return { 'action': 'create_trefoil', 'nodes': sorted(nodes) }
 
 		def collect():
 			# another trick to catch missing cases (allow getitem to fail)
@@ -255,22 +236,15 @@ class SimpleState(MSONable):
 
 	def __rule__destroy_trefoil(self):
 		''' Allows a trefoil defect to revert back into 3 divacancies. '''
-		def perform(id):
-			clone = self.clone()
-
+		def perform(id, self):
 			# Replace the trefoil with three divacancies
-			trefoil = clone.__trefoils.pop(id)
+			trefoil = self.__trefoils.pop(id)
 			nodes = trefoil['where']
-			vacancy_ids = [clone.__new_vacancy(LAYER_DIVACANCY, x) for x in nodes]
+			for node in nodes:
+				self.__new_vacancy(LAYER_DIVACANCY, node)
+			self.__update_status_cache()
 
-			clone.__update_status_cache()
-			return (clone, info(id, vacancy_ids, nodes))
-
-		def info(id, vacancy_ids, nodes):
-			return {
-				'action': 'destroy_trefoil', 'trefoil_id': id,
-				'vacancy_ids': vacancy_ids, 'vacancy_nodes': nodes,
-			}
+			return { 'action': 'destroy_trefoil', 'nodes': sorted(nodes) }
 
 		def collect():
 			for id, _ in self.trefoils_with_id():

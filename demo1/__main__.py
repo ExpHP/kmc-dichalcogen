@@ -16,7 +16,7 @@ def main():
 		type=delim_parser(positive_int, n=2, sep=','),
 		help='PBC grid dimensions '
 		' as # chalcogenides in the armchair/zigzag directions.')
-	parser.add_argument('-n', '--steps', default=20, help='stop after this many events')
+	parser.add_argument('-n', '--steps', type=positive_int, default=20, help='stop after this many events')
 	parser.add_argument('-P', '--output-pstats', help='record profiling data, '
 		'readable by the pstats module')
 	parser.add_argument('-p', '--profile', action='store_true', help='display profiling data')

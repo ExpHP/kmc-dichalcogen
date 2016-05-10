@@ -2,6 +2,7 @@
 from functools import partial
 import itertools
 import warnings
+from . import hex
 
 try: import cPickle as pickle
 except ImportError: import pickle
@@ -36,9 +37,11 @@ class SimpleState(MSONable):
 	def __init__(self, dim, vacancies=(), trefoils=()):
 		self.__vacancies = dict(vacancies)
 		self.__trefoils = dict(trefoils)
-		self.grid = TriangularGrid(*dim)
+		self.grid = Grid(dim)
 		self.__status_cache = self.__compute_status_cache()
 		self.__next_id = 0
+
+	def dim(self): return self.grid.dim
 
 	#------------------------------------------
 	# Monty.MSONable
@@ -48,16 +51,16 @@ class SimpleState(MSONable):
 			'@module': self.__class__.__module__,
 			'@class': self.__class__.__name__,
 			'next_id': self.__next_id,
-			'arm_dim': self.grid.arm_dim(),
-			'zag_dim': self.grid.zag_dim(),
+			'dim': self.grid.dim,
 			'vacancies': tuple(self.__vacancies.items()),
 			'trefoils': tuple(self.__trefoils.items()),
 		}
+
 	@classmethod
 	def from_dict(klass, d):
 		d = dict(d)
 		self = klass(
-			dim = (d.pop('arm_dim'), d.pop('zag_dim')),
+			dim = tuple(d.pop('dim')),
 			vacancies = d.pop('vacancies'),
 			trefoils = d.pop('trefoils'),
 		)
@@ -252,7 +255,6 @@ class SimpleState(MSONable):
 
 		return collect()
 
-
 	rules = [
 		__rule__new_vacancy,
 		__rule__migrate_vacancy,
@@ -263,60 +265,44 @@ class SimpleState(MSONable):
 		for rule in self.rules:
 			yield from rule(self)
 
-
-class TriangularGrid:
-	def __init__(self, arm_dim, zag_dim):
-		self.arm_dim = arm_dim
-		self.zag_dim = zag_dim
+# Periodic hexagonal grid, stored in axial coords.
+class Grid:
+	def __init__(self, dim):
+		self.dim = dim
+		assert len(self.dim) == 2
 
 	def nodes(self):
 		''' Iterate over all nodes. '''
-		return itertools.product(range(self.arm_dim), range(self.zag_dim))
-
-	def dim(self):
-		''' Get (armchair, zigzag) dimensions. '''
-		return (self.arm_dim, self.zag_dim)
+		return itertools.product(*(range(d) for d in self.dim))
 
 	def neighbors(self, node):
-		''' Get the six immediate neighbors of a node. '''
-		arm, zag = node
-		def inner():
-			offset = 1 - 2 * (arm%2)
-			for plusminus in [-1, 1]:
-				yield (arm, zag + plusminus) # zigzag edges
-				yield (arm + plusminus, zag) # some armchair edges
-				yield (arm + plusminus, zag + offset) # more armchairs
-		return set(map(self.reduce, inner()))
+		''' The six neighbors of a node on a hexagonal lattice. '''
+		return self.rotations_around(node, [-1, 0, 1])
 
 	def trefoil_neighbors(self, node):
-		'''
-		The six nodes with which this node can form a trefoil defect.
+		''' The six nodes with which a node can form a trefoil defect.
 
-		A trefoil defect may form when three divacancies are mutually
-		"trefoil neighbors" of each other.
-		'''
-		arm, zag = node
-		def inner():
-			for plusminus in [-1, 1]:
-				yield (arm, zag + 2*plusminus)
-				yield (arm + 2, zag + plusminus)
-				yield (arm - 2, zag + plusminus)
-		return set(map(self.reduce, inner()))
+		For one to actually form, three nodes must all mutually be
+		trefoil neighbors. '''
+		return self.rotations_around(node, [2,-1,-1])
+
+	def rotations_around(self, node, disp):
+		''' Get the node at node+disp, together with the other 5 nodes
+		related to it by the sixfold rotational symmetry around node. '''
+		a,b = node
+		for da, db, _ in hex.cubic_rotations_60(*disp):
+			yield self.reduce((a + da, b + db))
 
 	def can_form_trefoil(self, nodes):
 		''' Determine if the three given nodes can form a trefoil defect. '''
-		a,b,c = nodes
+		n1,n2,n3 = nodes
 		return all(
 			u in self.trefoil_neighbors(v)
-			for (u,v) in [(a,b), (b,c), (c,a)]
+			for (u,v) in [(n1,n2), (n2,n3), (n3,n1)]
 		)
 
 	def reduce(self, node):
 		''' Apply PBC to get a node's image in the unit cell. '''
-		arm, zag = node
-		return (arm % self.arm_dim, zag % self.zag_dim)
+		a, b = node
+		return (a % self.dim[0], b % self.dim[1])
 
-	# FIXME: try to describe this, it describes where the diagonal edges
-	#        coming off of a node lead
-	def __neighbor_zag_offset(self, arm):
-		return 1 - 2 * (arm%2)

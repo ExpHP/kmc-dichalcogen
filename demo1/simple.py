@@ -2,7 +2,8 @@
 from functools import partial
 import itertools
 import warnings
-from . import hex
+
+import hexagonal as hex
 
 try: import cPickle as pickle
 except ImportError: import pickle

@@ -72,30 +72,3 @@ def _unfold(f, start, takeN):
 		yield start
 		start = f(*start)
 
-# A set of integer matrices which can be composed together by the
-#  DIY enthusiast to form composite operations. To avoid importing
-#  numpy, they are presented here as 2D lists;
-#  do with them what you will.
-MATRIX_CUBIC_TO_AXIALSUM = [
-	[ 1,  0,  0],
-	[ 0,  1,  0],
-	[ 1,  1,  1],
-]
-MATRIX_AXIALSUM_TO_CUBIC = [
-	[ 1,  0,  0],
-	[ 0,  1,  0],
-	[-1, -1,  1],
-]
-MATRIX_CUBIC_ROT_60 = [
-	[ 0, -1,  0],
-	[ 0,  0, -1],
-	[-1,  0,  0],
-]
-
-# A one-way conversion matrix to cartesian, which assumes the
-# same orientation specified in cubic_to_cart()
-MATRIX_CUBIC_TO_CART = [
-	[ 3**0.5/2, -3**0.5/2, 0.],
-	[ 0.5, 0.5, 1.],
-]
-

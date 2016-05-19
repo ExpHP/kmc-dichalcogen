@@ -8,7 +8,7 @@
 
 which will put it all in a folder called `kmc-dichalcogen`.
 
-**Option 2**: You can download a zip file from this page. (Ctrl+F for "Clone or download")
+**Option 2**: You can [download a zip file here](https://github.com/ExpHP/kmc-dichalcogen/archive/master.zip).
 
 ## Run it
 

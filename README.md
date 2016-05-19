@@ -2,20 +2,21 @@
 
 ## Get it
 
-Option 1: The cool people way (using git):
+**Option 1**: The cool people way (using git):
 
-    git clone https://github.com/exphp/kmc-dichalcogen
+    git clone https://github.com/ExpHP/kmc-dichalcogen.git
 
-Option 2: You can download a zip file from this page. (Ctrl+F for "Clone or download")
+which will put it all in a folder called `kmc-dichalcogen`.
+
+**Option 2**: You can download a zip file from this page. (Ctrl+F for "Clone or download")
 
 ## Run it
 
 Go to where the "demo1" folder is located (don't go inside it)
-and run:
+and run: (The `-m` is *not optional*)
 
     python -m demo1
 
-(The `-m` is not optional)
 This runs the script with some not-so-well thought out default settings.
 Speaking of settings, for a list of them, type:
 

@@ -14,8 +14,7 @@ def main():
 	parser.add_argument('-d', '--dimensions', metavar='ARM,ZAG',
 		default=[50,50],
 		type=delim_parser(positive_int, n=2, sep=','),
-		help='PBC grid dimensions '
-		' as # chalcogenides in the armchair/zigzag directions.')
+		help='PBC grid dimensions as a number of unit cells in each dimension')
 	parser.add_argument('-n', '--steps', type=positive_int, default=20, help='stop after this many events')
 	parser.add_argument('-P', '--output-pstats', help='record profiling data, '
 		'readable by the pstats module')
@@ -40,13 +39,65 @@ def main():
 
 def run(ofile, nsteps, dims):
 	import json
+
 	state = State(dims)
+
+	# to write json incrementally we'll need to do a bit ourselves
+	with write_enclosing('{', '\n}', ofile):
+		ofile.write('"grid": ')
+		json.dump(grid_info(dims), ofile, indent=2)
+		ofile.write(',\n')
+
+		with write_enclosing(' "events": [\n  ', '\n ]', ofile):
+			# everything here is done with iterators for the sake of
+			# incremental output
+			infos = run_steps(state, nsteps)
+			strs = (json.dumps(x, sort_keys=True) for x in infos)
+			for s in with_separator(',\n  ', strs):
+				ofile.write(s)
+
+	ofile.write('\n')
+
+def run_steps(state, nsteps):
 	for _ in range(nsteps):
 		performer = kmc.weighted_choice(state.edges())
 		info = performer(state) # warning: this mutates state
-		json.dump(info, ofile, sort_keys=True)
-		ofile.write('\n')
-		ofile.flush()
+		yield info
+
+class write_enclosing:
+	'''
+	Context manager that writes strings to a file.
+
+	Writes strings when the block is entered & exited, be it cleanly
+	or via an exception. For a computation that streams structured
+	output (XML, JSON, ...), this may result in a more easily
+	salvagable output file if the computation is interrupted.
+	(just don't bet your life on it)
+	'''
+	def __init__(self, start, end, file):
+		self.file = file
+		self.start = start
+		self.end = end
+	def __enter__(self): self.file.write(self.start)
+	def __exit__(self, *args): self.file.write(self.end)
+
+def with_separator(separator, iterable):
+	'''
+	Turns ``[a,b,c,d,...e,f]`` into ``[a,x,b,x,...e,x,f]``.
+	'''
+	it = iter(iterable)
+	first = next(it)
+	yield first
+	for x in it:
+		yield separator
+		yield x
+
+def grid_info(dims):
+	return {
+		'lattice_type': 'hexagonal',
+		'coord_format': 'axial',
+		'dim': dims,
+	}
 
 #-----------------------------
 

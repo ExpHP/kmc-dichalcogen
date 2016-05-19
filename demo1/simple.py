@@ -15,7 +15,7 @@ from monty.json import MSONable
 RATE_CREATE_VACANCY = 1.
 RATE_MIGRATE_VACANCY = 1.
 RATE_CREATE_TREFOIL = 50.
-RATE_DESTROY_TREFOIL = 1.
+RATE_DESTROY_TREFOIL = 25.
 
 # Node occupation flags used in the node status cache
 STATUS_NO_VACANCY = 0
@@ -264,7 +264,8 @@ class SimpleState(MSONable):
 	]
 	def edges(self):
 		for rule in self.rules:
-			yield from rule(self)
+			for e in rule(self):
+				yield e
 
 # Periodic hexagonal grid, stored in axial coords.
 class Grid:

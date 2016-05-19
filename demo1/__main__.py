@@ -1,3 +1,7 @@
+#!/usr/bin
+
+from __future__ import print_function
+
 import sys
 import argparse
 from functools import partial
@@ -10,27 +14,28 @@ PROG = 'demo1'
 def main():
 	parser = argparse.ArgumentParser('python -m ' + PROG, description='')
 
-	parser.add_argument('-o', '--output-raw')
 	parser.add_argument('-d', '--dimensions', metavar='ARM,ZAG',
 		default=[50,50],
 		type=delim_parser(positive_int, n=2, sep=','),
 		help='PBC grid dimensions as a number of unit cells in each dimension')
-	parser.add_argument('-n', '--steps', type=positive_int, default=20, help='stop after this many events')
-	parser.add_argument('-P', '--output-pstats', help='record profiling data, '
-		'readable by the pstats module')
-	parser.add_argument('-p', '--profile', action='store_true', help='display profiling data')
+	parser.add_argument('-n', '--steps', type=positive_int, default=20,
+		help='stop after this many events')
+	parser.add_argument('-P', '--output-pstats',
+		help='record profiling data, readable by the pstats module')
+	parser.add_argument('-p', '--profile', action='store_true',
+		help='display profiling data')
 	args = parser.parse_args()
 
 	def myrun():
 		run(
-			ofile = args.output_raw or sys.stdout,
+			ofile = sys.stdout,
 			nsteps = args.steps,
 			dims = args.dimensions,
 		)
 
 	if args.output_pstats or args.profile:
 		stats_out = args.output_pstats
-		text_out = args.profile and sys.stderr
+		text_out = (args.profile or None) and sys.stderr
 		with_profiling(myrun, stats_out, text_out)
 	else:
 		myrun()
@@ -101,6 +106,8 @@ def grid_info(dims):
 
 #-----------------------------
 
+# Because this script is run via -m, we cannot do "-m cProfile".
+# Hence profiling is provided as a flag.
 def with_profiling(f, stats_out=None, text_out=None):
 	try: from cProfile import Profile
 	except: from profile import Profile

@@ -49,7 +49,9 @@ def cubic_to_cart(a,b,c):
 	Treats the a vector as pointing NE, the 'b' vector as pointing NW,
 	and the 'c' vector as pointing S.
 	'''
-	return (0.5*(3**0.5)*(a-b), 0.5*(a+b)+c)
+	return (0.5*(3**0.5)*(a-b), 0.5*(a+b)-c)
+def axialsum_to_cart(a,b,p):
+	return cubic_to_cart(*axialsum_to_cubic(a,b,p))
 
 def cubic_rotate_60(a,b,c): return (-b, -c, -a)
 def cubic_rotations_60(a,b,c):

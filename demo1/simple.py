@@ -8,8 +8,6 @@ import hexagonal as hex
 try: import cPickle as pickle
 except ImportError: import pickle
 
-from monty.json import MSONable
-
 # FIXME these shouldn't be constant.  They are right now simply so
 #  the script can run
 RATE_CREATE_VACANCY = 1.
@@ -28,13 +26,7 @@ LAYER_DIVACANCY = 'both'
 LAYER_MONOVACANCY_1 = 'top'
 LAYER_MONOVACANCY_2 = 'bottom'
 
-# FIXME One side-goal is to be able to replay events for old data, which is
-#  most easily implemented as part of the class, and therefore might require
-#  keeping old versions of the State class around.  This makes it troubling
-#  to have a class that does so much because it may result in a lot of code
-#  duplication between classes.
-
-class SimpleState(MSONable):
+class SimpleState:
 	def __init__(self, dim, vacancies=(), trefoils=()):
 		self.__vacancies = dict(vacancies)
 		self.__trefoils = dict(trefoils)
@@ -43,34 +35,6 @@ class SimpleState(MSONable):
 		self.__next_id = 0
 
 	def dim(self): return self.grid.dim
-
-	#------------------------------------------
-	# Monty.MSONable
-
-	def as_dict(self):
-		return {
-			'@module': self.__class__.__module__,
-			'@class': self.__class__.__name__,
-			'next_id': self.__next_id,
-			'dim': self.grid.dim,
-			'vacancies': tuple(self.__vacancies.items()),
-			'trefoils': tuple(self.__trefoils.items()),
-		}
-
-	@classmethod
-	def from_dict(klass, d):
-		d = dict(d)
-		self = klass(
-			dim = tuple(d.pop('dim')),
-			vacancies = d.pop('vacancies'),
-			trefoils = d.pop('trefoils'),
-		)
-		self.__next_id = d.pop('next_id')
-		qual_name = '%s.%s'.format(d.pop('@module'), d.pop('@class'))
-		for key in d:
-			warnings.warn('Unrecognized key in dict for class {!s}: {!r}'.format(
-				qual_name, key))
-		return self
 
 	#------------------------------------------
 	# General helpers

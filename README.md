@@ -1,4 +1,4 @@
-# pykmc
+# kmc-dichalcogen
 
 ## Get it
 

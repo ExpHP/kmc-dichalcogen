@@ -9,8 +9,8 @@ Cubic
 =====
 This format defines points as a linear combination of 3 vectors
 ``xy = a * avec + b * bvec + c * cvec``, where ``avec`` represents
-edges pointing NE, ``bvec`` represents edges pointing NW, and ``cvec``
-represents edges pointing S.
+edges pointing SE, ``bvec`` represents edges pointing NE, and ``cvec``
+represents edges pointing W.
 
 This format is particularly useful for relationships such as distance
 and neighborship on a hexagonal graph, because the format reflects the
@@ -46,10 +46,10 @@ def cubic_to_cart(a,b,c):
 	'''
 	Map the points to cartesian.
 
-	Treats the a vector as pointing NE, the 'b' vector as pointing NW,
-	and the 'c' vector as pointing S.
+	Treats the 'a' vector as pointing SE, the 'b' vector as pointing NE,
+	and the 'c' vector as pointing W.
 	'''
-	return (0.5*(3**0.5)*(a-b), 0.5*(a+b)-c)
+	return (0.5*(a+b)-c, 0.5*(3**0.5)*(b-a))
 def axialsum_to_cart(a,b,p):
 	return cubic_to_cart(*axialsum_to_cubic(a,b,p))
 

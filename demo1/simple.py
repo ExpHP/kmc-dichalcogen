@@ -250,7 +250,7 @@ class Grid:
 
 		For one to actually form, three nodes must all mutually be
 		trefoil neighbors. '''
-		return self.rotations_around(node, [2,-1,-1])
+		return self.rotations_around(node, [2,-2,0])
 
 	def rotations_around(self, node, disp):
 		''' Get the node at node+disp, together with the other 5 nodes

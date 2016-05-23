@@ -27,6 +27,7 @@ LAYER_MONOVACANCY_1 = 'top'
 LAYER_MONOVACANCY_2 = 'bottom'
 
 class SimpleState:
+
 	def __init__(self, dim):
 		self.grid = Grid(dim)
 		self.__vacancies = {}
@@ -34,12 +35,38 @@ class SimpleState:
 		self.__nodes = self.__compute_nodes_lookup()
 		self.__next_id = 0
 
-	def dim(self): return self.grid.dim
+	def dim(self):
+		return self.grid.dim
+
+	def clone(self):
+		return pickle.loads(pickle.dumps(self))
 
 	#------------------------------------------
-	# STATUS CACHE
-	# The status cache stores redundant information allowing for O(1) lookup
-	#  of certain features of the state that would otherwise be O(n) to compute.
+	# prot
+
+	# FIXME: I think I may want to switch these dicts out for named tuples,
+	#  to help dodge bugs caused by mispelling keys in __setitem__
+
+	def __compute_nodes_lookup(self):
+		''' generates __nodes from __vacancies and __trefoils '''
+		cache = {
+			x: {'status': STATUS_NO_VACANCY, 'owner': None }
+			for x in self.grid.nodes()
+		}
+
+		for id, v in self.__vacancies.items():
+			assert v['layer'] == LAYER_DIVACANCY, ('looks like this function'
+				' (and all users of status functions) needs updating')
+			node = v['where']
+			cache[node]['status'] = STATUS_DIVACANCY
+			cache[node]['owner'] = id
+
+		for id, v in self.__trefoils.items():
+			for node in v['where']:
+				cache[node]['status'] = STATUS_TREFOIL_PARTICIPANT
+				cache[node]['owner'] = id
+
+		return cache
 
 	def __debug_validate_nodes_lookup(self):
 		def run_in_debug_only():
@@ -64,44 +91,27 @@ class SimpleState:
 
 		assert run_in_debug_only()
 
-	# generates __nodes from __vacancies and __trefoils
-	def __compute_nodes_lookup(self):
-		cache = {
-			x: {'status': STATUS_NO_VACANCY, 'owner': None }
-			for x in self.grid.nodes()
-		}
+	#------------------------------------------
+	# Accessors/iterators
 
-		for id, v in self.__vacancies.items():
-			assert v['layer'] == LAYER_DIVACANCY, ('looks like this function'
-				' (and all users of status functions) needs updating')
-			node = v['where']
-			cache[node]['status'] = STATUS_DIVACANCY
-			cache[node]['owner'] = id
+	def vacancies(self): return self.__vacancies.__iter__()
+	def vacancy_node(self, id): return self.__vacancies[id]['where']
+	def vacancy_layer(self, id): return self.__vacancies[id]['layer']
+	def vacancies_with_id(self): return self.__vacancies.items()
 
-		for id, v in self.__trefoils.items():
-			for node in v['where']:
-				cache[node]['status'] = STATUS_TREFOIL_PARTICIPANT
-				cache[node]['owner'] = id
-
-		return cache
-
-	# Status cache accessors
+	def nodes(self): return self.grid.nodes()
 	def node_status(self, node): return self.__nodes[node]['status']
 	def node_vacancy_id(self, node): return self.__nodes[node]['owner']
-
-	#------------------------------------------
-	# General helpers
-
-	def clone(self): return pickle.loads(pickle.dumps(self))
-	def nodes(self): return self.grid.nodes()
 	def nodes_with_status(self): return [(n, self.node_status(n)) for n in self.nodes()]
-	def vacancies(self): return self.__vacancies.__iter__()
+
 	def trefoils(self): return self.__trefoils.__iter__()
-	def vacancies_with_id(self): return self.__vacancies.items()
+	def trefoil_nodes(self, id): return self.__trefoils[id]['where']
 	def trefoils_with_id(self): return self.__trefoils.items()
 
 	#------------------------------------------
-	# Mutators
+	# High-level mutators
+	# All of these (ought to) maintain the class invariants tested
+	#  by __debug_validate_nodes_lookup
 
 	def make_vacancy(self, layer, node):
 		id = self.__gen_vacancy(layer, node)
@@ -148,6 +158,9 @@ class SimpleState:
 		self.__debug_validate_nodes_lookup()
 		return ids
 
+	#------------------------------------------
+	# Low-level mutators
+
 	def __consume_id(self):
 		id = self.__next_id
 		self.__next_id = self.__next_id + 1
@@ -167,11 +180,6 @@ class SimpleState:
 		self.__trefoils[id] = {'where': nodes}
 		return id
 
-	# these accessors and setters are intended to be a temporary solution
-	def trefoil_nodes(self, id): return self.__trefoils[id]['where']
-	def vacancy_node(self, id): return self.__vacancies[id]['where']
-	def vacancy_layer(self, id): return self.__vacancies[id]['layer']
-
 class SimpleModel:
 
 	#------------------------------------------
@@ -189,11 +197,10 @@ class SimpleModel:
 	# This info dict may contain details that weren't decided until the
 	# 'perform' method was run; hence the double duty.
 
-	# (note: the primary motivation for having 'perform' mutate the input
-	#  state was just to make the code easier to read... though it also
-	#  sets the stage for incremental status cache updates)
-
 	# FIXME This still looks and feels overengineered. :/
+	# Now that SimpleState and SimpleModel have been separated, it may be
+	# easier to think about what this code is really trying to do, and how
+	# it might be cleaned up.
 
 	def __rule__new_vacancy(self, state):
 		''' Allows new vacancies to form in sites with atoms. '''

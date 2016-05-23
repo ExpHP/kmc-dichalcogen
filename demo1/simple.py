@@ -32,7 +32,7 @@ class SimpleState:
 		self.__vacancies = {}
 		self.__trefoils = {}
 		self.__nodes = self.__compute_nodes_lookup()
-		self.__next_id = 0 # FIXME what if vacancies/trefoils are given to the constructor?
+		self.__next_id = 0
 
 	def dim(self): return self.grid.dim
 
@@ -41,8 +41,28 @@ class SimpleState:
 	# The status cache stores redundant information allowing for O(1) lookup
 	#  of certain features of the state that would otherwise be O(n) to compute.
 
-	def __update_nodes_lookup(self):
-		self.__nodes = self.__compute_nodes_lookup()
+	def __debug_validate_nodes_lookup(self):
+		def run_in_debug_only():
+			expected = self.__compute_nodes_lookup()
+			actual   = self.__nodes
+
+			missing_nodes = set(expected) - set(actual)
+			if missing_nodes:
+				raise AssertionError("node not in lookup: {!r}".format(missing_nodes.pop()))
+
+			unexpected_nodes = set(actual) - set(expected)
+			if unexpected_nodes:
+				raise AssertionError("unexpected node in lookup: {!r}".format(unexpected_nodes.pop()))
+
+			for n in expected:
+				if expected[n] != actual[n]:
+					raise AssertionError("bad data for node {!r}\n"
+						"  In Table: {!r}\n"
+						"  Expected: {!r}".format(n, actual[n], expected[n]))
+
+			return True
+
+		assert run_in_debug_only()
 
 	# generates __nodes from __vacancies and __trefoils
 	def __compute_nodes_lookup(self):
@@ -83,30 +103,50 @@ class SimpleState:
 	#------------------------------------------
 	# Mutators
 
-	def make_trefoil_from_vacancies(self, ids):
-		ids = tuple(ids)
-		nodes = [self.vacancy_node(x) for x in ids]
-		for x in ids:
-			del self.__vacancies[x]
-		id = self.__add_trefoil(nodes)
-		self.__update_nodes_lookup()
-		return id
-
-	def make_vacancies_from_trefoil(self, id):
-		nodes = self.trefoil_nodes(id)
-		del self.__trefoils[id]
-		ids = [self.__add_vacancy(LAYER_DIVACANCY, node) for node in nodes]
-		self.__update_nodes_lookup()
-		return ids
-
 	def make_vacancy(self, layer, node):
-		id = self.__add_vacancy(layer, node)
-		self.__update_nodes_lookup()
+		id = self.__gen_vacancy(layer, node)
+
+		self.__nodes[node]['status'] = STATUS_DIVACANCY
+		self.__nodes[node]['owner'] = id
+		self.__debug_validate_nodes_lookup()
 		return id
 
 	def move_vacancy(self, id, dest):
-		self.set_vacancy_node(id, dest)
-		self.__update_nodes_lookup()
+		old = self.__vacancies[id]['where']
+		status = self.__nodes[old]['status']
+
+		self.__vacancies[id]['where'] = tuple(dest)
+
+		self.__nodes[old]['status']  = STATUS_NO_VACANCY
+		self.__nodes[dest]['status'] = status
+
+		self.__nodes[old]['owner']  = None
+		self.__nodes[dest]['owner'] = id
+		self.__debug_validate_nodes_lookup()
+
+	def make_trefoil_from_vacancies(self, ids):
+		ids = tuple(ids)
+		nodes = [self.__vacancies[i]['where'] for i in ids]
+		new_id = self.__gen_trefoil(nodes)
+		for n,i in zip(nodes, ids):
+			del self.__vacancies[i]
+			self.__nodes[n]['status'] = STATUS_TREFOIL_PARTICIPANT
+			self.__nodes[n]['owner'] = new_id
+
+		self.__debug_validate_nodes_lookup()
+		return new_id
+
+	def make_vacancies_from_trefoil(self, id):
+		trefoil = self.__trefoils.pop(id)
+		nodes = trefoil['where']
+		ids = [self.__gen_vacancy(LAYER_DIVACANCY, node) for node in nodes]
+
+		for n,i in zip(nodes, ids):
+			self.__nodes[n]['status'] = STATUS_DIVACANCY
+			self.__nodes[n]['owner'] = i
+
+		self.__debug_validate_nodes_lookup()
+		return ids
 
 	def __consume_id(self):
 		id = self.__next_id
@@ -115,12 +155,12 @@ class SimpleState:
 		assert id not in self.__trefoils
 		return id
 
-	def __add_vacancy(self, layer, node):
+	def __gen_vacancy(self, layer, node):
 		id = self.__consume_id()
 		self.__vacancies[id] = {'layer': layer, 'where': tuple(node)}
 		return id
 
-	def __add_trefoil(self, nodes):
+	def __gen_trefoil(self, nodes):
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
 		id = self.__consume_id()
@@ -131,12 +171,6 @@ class SimpleState:
 	def trefoil_nodes(self, id): return self.__trefoils[id]['where']
 	def vacancy_node(self, id): return self.__vacancies[id]['where']
 	def vacancy_layer(self, id): return self.__vacancies[id]['layer']
-	def set_trefoil_nodes(self, id, value):
-		self.__trefoils[id]['where'] = tuple(map(tuple, value))
-	def set_vacancy_node(self, id, value):
-		self.__vacancies[id]['where'] = tuple(value)
-	def set_vacancy_layer(self, id, value):
-		self.__vacancies[id]['layer'] = value
 
 class SimpleModel:
 

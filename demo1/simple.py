@@ -37,22 +37,11 @@ class SimpleState:
 	def dim(self): return self.grid.dim
 
 	#------------------------------------------
-	# General helpers
-
-	def clone(self): return pickle.loads(pickle.dumps(self))
-	def nodes(self): return self.grid.nodes()
-	def nodes_with_status(self): return [(n, self.node_status(n)) for n in self.nodes()]
-	def vacancies(self): return self.__vacancies.__iter__()
-	def trefoils(self): return self.__trefoils.__iter__()
-	def vacancies_with_id(self): return self.__vacancies.items()
-	def trefoils_with_id(self): return self.__trefoils.items()
-
-	#------------------------------------------
 	# STATUS CACHE
 	# The status cache stores redundant information allowing for O(1) lookup
 	#  of certain features of the state that would otherwise be O(n) to compute.
 
-	def __update_status_cache(self):
+	def update_status_cache(self):
 		self.__status_cache = self.__compute_status_cache()
 
 	def __compute_status_cache(self):
@@ -80,7 +69,18 @@ class SimpleState:
 	def node_vacancy_id(self, node): return self.__status_cache[node]['owner']
 
 	#------------------------------------------
-	# Mutating functions
+	# General helpers
+
+	def clone(self): return pickle.loads(pickle.dumps(self))
+	def nodes(self): return self.grid.nodes()
+	def nodes_with_status(self): return [(n, self.node_status(n)) for n in self.nodes()]
+	def vacancies(self): return self.__vacancies.__iter__()
+	def trefoils(self): return self.__trefoils.__iter__()
+	def vacancies_with_id(self): return self.__vacancies.items()
+	def trefoils_with_id(self): return self.__trefoils.items()
+
+	#------------------------------------------
+	# Mutators
 
 	def __consume_id(self):
 		id = self.__next_id
@@ -89,17 +89,33 @@ class SimpleState:
 		assert id not in self.__trefoils
 		return id
 
-	def __new_vacancy(self, layer, node):
+	def add_vacancy(self, layer, node):
 		id = self.__consume_id()
 		self.__vacancies[id] = {'layer': layer, 'where': tuple(node)}
 		return id
 
-	def __new_trefoil(self, nodes):
+	def add_trefoil(self, nodes):
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
 		id = self.__consume_id()
 		self.__trefoils[id] = {'where': nodes}
 		return id
+
+	def del_vacancy(self, id): self.__vacancies.pop(id)
+	def del_trefoil(self, id): self.__trefoils.pop(id)
+
+	# these accessors and setters are intended to be a temporary solution
+	def trefoil_nodes(self, id): return self.__trefoils[id]['where']
+	def vacancy_node(self, id): return self.__vacancies[id]['where']
+	def vacancy_layer(self, id): return self.__vacancies[id]['layer']
+	def set_trefoil_nodes(self, id, value):
+		self.__trefoils[id]['where'] = tuple(map(tuple, value))
+	def set_vacancy_node(self, id, value):
+		self.__vacancies[id]['where'] = tuple(value)
+	def set_vacancy_layer(self, id, value):
+		self.__vacancies[id]['layer'] = value
+
+class SimpleModel:
 
 	#------------------------------------------
 	# Rules
@@ -122,16 +138,16 @@ class SimpleState:
 
 	# FIXME This still looks and feels overengineered. :/
 
-	def __rule__new_vacancy(self):
+	def __rule__new_vacancy(self, state):
 		''' Allows new vacancies to form in sites with atoms. '''
-		def perform(layer, node, self):
-			self.__new_vacancy(layer, node)
-			self.__update_status_cache()
+		def perform(layer, node, state):
+			state.add_vacancy(layer, node)
+			state.update_status_cache()
 
 			return { 'action': 'create_vacancy', 'layer': layer, 'node': node }
 
-		def collect():
-			for (node, status) in self.nodes_with_status():
+		def collect(state):
+			for (node, status) in state.nodes_with_status():
 				if status is STATUS_NO_VACANCY:
 					yield (partial(perform, LAYER_DIVACANCY, node), RATE_CREATE_VACANCY)
 
@@ -142,21 +158,21 @@ class SimpleState:
 		# FIXME: honestly the only reason this was written as an inner method
 		# is because it makes the code read better. (any less wtf solution?)
 		# The same goes for all other collect() methods.
-		return collect()
+		return collect(state)
 
-	def __rule__migrate_vacancy(self):
+	def __rule__migrate_vacancy(self, state):
 		''' Allows vacancies to move to adjacent sites. '''
-		def perform(id, dest, self):
-			old = tuple(self.__vacancies[id]['where'])
-			self.__vacancies[id]['where'] = tuple(dest)
-			self.__update_status_cache()
+		def perform(id, dest, state):
+			old = tuple(state.vacancy_node(id))
+			state.set_vacancy_node(id, dest)
+			state.update_status_cache()
 
 			return { 'action': 'move_vacancy', 'was': old, 'now': dest }
 
-		def collect():
-			for (id, vacancy) in self.vacancies_with_id():
-				for nbr in self.grid.neighbors(vacancy['where']):
-					status = self.node_status(nbr)
+		def collect(state):
+			for (id, vacancy) in state.vacancies_with_id():
+				for nbr in state.grid.neighbors(vacancy['where']):
+					status = state.node_status(nbr)
 
 					if status is STATUS_NO_VACANCY:
 						yield (partial(perform, id, nbr), RATE_MIGRATE_VACANCY)
@@ -165,60 +181,61 @@ class SimpleState:
 					elif status is STATUS_TREFOIL_PARTICIPANT: pass
 					else: assert False, 'complete switch'
 
-		return collect()
+		return collect(state)
 
-	def __rule__create_trefoil(self):
+	def __rule__create_trefoil(self, state):
 		''' Allows 3 divacancies to join into a rotated, trefoil defect. '''
-		def perform(vacancy_ids, self):
+		def perform(vacancy_ids, state):
 			vacancy_ids = tuple(vacancy_ids)
-			vacancies = [self.__vacancies.pop(x) for x in vacancy_ids]
-			nodes = [x['where'] for x in vacancies]
-			self.__new_trefoil(nodes)
-			self.__update_status_cache()
+			nodes = [state.vacancy_node(x) for x in vacancy_ids]
+			for x in vacancy_ids:
+				state.del_vacancy(x)
+			state.add_trefoil(nodes)
+			state.update_status_cache()
 
 			return { 'action': 'create_trefoil', 'nodes': sorted(nodes) }
 
-		def collect():
+		def collect(state):
 			# another trick to catch missing cases (allow getitem to fail)
 			can_become_trefoil = (lambda node: {
 				STATUS_DIVACANCY: True,
 				STATUS_NO_VACANCY: False,
 				STATUS_TREFOIL_PARTICIPANT: False,
-			}[self.node_status(node)])
+			}[state.node_status(node)])
 
-			for id1, v1 in self.vacancies_with_id():
+			for id1, v1 in state.vacancies_with_id():
 				assert v1['layer'] == LAYER_DIVACANCY
 				node1 = v1['where']
 
 				# find two "trefoil neighbors" of node1 that are also trefoil
 				#  neighbors with each other (forming a 3-clique)
-				neighbors = self.grid.trefoil_neighbors(node1)
+				neighbors = state.grid.trefoil_neighbors(node1)
 				neighbors = list(filter(can_become_trefoil, neighbors))
 				for node2, node3 in itertools.combinations(neighbors, r=2):
-					if node2 in self.grid.trefoil_neighbors(node3):
+					if node2 in state.grid.trefoil_neighbors(node3):
 
-						ids = (id1, self.node_vacancy_id(node2), self.node_vacancy_id(node3))
+						ids = (id1, state.node_vacancy_id(node2), state.node_vacancy_id(node3))
 						yield (partial(perform, ids), RATE_CREATE_TREFOIL)
 
-		return collect()
+		return collect(state)
 
-	def __rule__destroy_trefoil(self):
+	def __rule__destroy_trefoil(self, state):
 		''' Allows a trefoil defect to revert back into 3 divacancies. '''
-		def perform(id, self):
+		def perform(id, state):
 			# Replace the trefoil with three divacancies
-			trefoil = self.__trefoils.pop(id)
-			nodes = trefoil['where']
+			nodes = state.trefoil_nodes(id)
+			state.del_trefoil(id)
 			for node in nodes:
-				self.__new_vacancy(LAYER_DIVACANCY, node)
-			self.__update_status_cache()
+				state.add_vacancy(LAYER_DIVACANCY, node)
+			state.update_status_cache()
 
 			return { 'action': 'destroy_trefoil', 'nodes': sorted(nodes) }
 
-		def collect():
-			for id, _ in self.trefoils_with_id():
+		def collect(state):
+			for id, _ in state.trefoils_with_id():
 				yield (partial(perform, id), RATE_DESTROY_TREFOIL)
 
-		return collect()
+		return collect(state)
 
 	rules = [
 		__rule__new_vacancy,
@@ -226,9 +243,9 @@ class SimpleState:
 		__rule__create_trefoil,
 		__rule__destroy_trefoil,
 	]
-	def edges(self):
+	def edges(self, state):
 		for rule in self.rules:
-			for e in rule(self):
+			for e in rule(self, state):
 				yield e
 
 # Periodic hexagonal grid, stored in axial coords.

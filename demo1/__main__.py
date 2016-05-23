@@ -7,6 +7,7 @@ import argparse
 from functools import partial
 
 from .simple import SimpleState as State
+from .simple import SimpleModel as Model
 from . import kmc
 
 PROG = 'demo1'
@@ -45,7 +46,8 @@ def main():
 def run(ofile, nsteps, dims):
 	import json
 
-	state = State(dims)
+	init_state = State(dims)
+	model = Model()
 
 	# to write json incrementally we'll need to do a bit ourselves
 	with write_enclosing('{', '\n}', ofile):
@@ -56,16 +58,17 @@ def run(ofile, nsteps, dims):
 		with write_enclosing(' "events": [\n  ', '\n ]', ofile):
 			# everything here is done with iterators for the sake of
 			# incremental output
-			infos = run_steps(state, nsteps)
+			infos = run_steps(model, init_state, nsteps)
 			strs = (json.dumps(x, sort_keys=True) for x in infos)
 			for s in with_separator(',\n  ', strs):
 				ofile.write(s)
 
 	ofile.write('\n')
 
-def run_steps(state, nsteps):
+def run_steps(model, init_state, nsteps):
+	state = init_state.clone()
 	for _ in range(nsteps):
-		performer = kmc.weighted_choice(state.edges())
+		performer = kmc.weighted_choice(model.edges(state))
 		info = performer(state) # warning: this mutates state
 		yield info
 

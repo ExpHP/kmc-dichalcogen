@@ -42,8 +42,6 @@ class SimpleState:
 		return pickle.loads(pickle.dumps(self))
 
 	#------------------------------------------
-	# prot
-
 	# FIXME: I think I may want to switch these dicts out for named tuples,
 	#  to help dodge bugs caused by mispelling keys in __setitem__
 
@@ -258,6 +256,8 @@ class SimpleModel:
 				STATUS_TREFOIL_PARTICIPANT: False,
 			}[state.node_status(node)])
 
+			# FIXME It is unclear to me that this code does not generate
+			#  multiple events per triplet of nodes.  Look into this.
 			for id1, v1 in state.vacancies_with_id():
 				assert v1['layer'] == LAYER_DIVACANCY
 				node1 = v1['where']

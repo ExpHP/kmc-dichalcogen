@@ -6,8 +6,11 @@ import sys
 import argparse
 from functools import partial
 
-from .simple import SimpleState as State
-from .simple import SimpleModel as Model
+#from .simple import SimpleState as State
+#from .simple import SimpleModel as Model
+from .state import RuleSet as Model
+from .state import State
+from .state import EventManager
 from . import kmc
 
 PROG = 'demo1'
@@ -36,7 +39,7 @@ def main():
 
 	if args.output_pstats or args.profile:
 		stats_out = args.output_pstats
-		text_out = (args.profile or None) and sys.stderr
+		text_out = sys.stderr if args.profile else None
 		with_profiling(myrun, stats_out, text_out)
 	else:
 		myrun()
@@ -46,8 +49,9 @@ def main():
 def run(ofile, nsteps, dims):
 	import json
 
-	init_state = State(dims)
-	model = Model()
+	event_manager = EventManager()
+	init_state = State(dims, emit=event_manager.emit)
+	model = Model(init_state, event_manager)
 
 	# to write json incrementally we'll need to do a bit ourselves
 	with write_enclosing('{', '\n}', ofile):
@@ -68,9 +72,11 @@ def run(ofile, nsteps, dims):
 def run_steps(model, init_state, nsteps):
 	state = init_state.clone()
 	for _ in range(nsteps):
-		performer = kmc.weighted_choice(model.edges(state))
-		info = performer(state) # warning: this mutates state
-		yield info
+		(edges, metadata) = model.edges(state)
+		kind = kmc.weighted_choice(edges)
+
+		# warning: this mutates state
+		yield model.perform_move(kind=kind, state=state, metadata=metadata)
 
 class write_enclosing:
 	'''

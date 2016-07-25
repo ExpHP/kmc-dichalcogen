@@ -1,7 +1,7 @@
 import random
-import sys
 import numpy as np
 from collections import defaultdict, Counter
+from .util import debug
 
 class IncrementalMoveCache():
 	'''
@@ -15,25 +15,34 @@ class IncrementalMoveCache():
 	def __init__(self):
 		self.__kindset = ReverseDict() # { move: kindset }
 
+	@debug('MoveCache.', member=True)
 	def add(self, move, kind):
-		print(list(self.__kindset))
-		print('ADD', move, file=sys.stderr)
+		# rip the move out
 		kindset = self.__kindset.pop(move, frozenset())
+
 		if kind in kindset:
+			self.__kindset[move] = kindset # restore old state...
 			raise ValueError("kind already present")
+
+		# put it back in with one additional kind
 		kindset |= set([kind])
 		self.__kindset[move] = kindset
 
 	def clear_one(self, move, kind):
-		kindset = self.__kindset.pop(move)
+		# rip the move out
+		kindset = self.__kindset.pop(move, frozenset())
+
 		if kind not in kindset:
+			self.__kindset[move] = kindset # restore old state...
 			raise ValueError("kind not present")
+
+		# put it back in with one less kind
 		kindset -= set([kind])
 		if kindset:
 			self.__kindset[move] = kindset
 
+	@debug('MoveCache.', member=True)
 	def clear_all(self, move):
-		print('CLEAR_ALL', move, file=sys.stderr)
 		self.__kindset.pop(move, frozenset())
 
 	def randomly_decided_counts(self):
@@ -93,11 +102,23 @@ class IncrementalMoveCache():
 		'''
 		Obtain a ``dict`` of ``{frozenset(kinds): count}``
 
-		Each move is only counted once across all counts.
-		A Move associated with multiple Kinds will be counted under a key with the
-		frozenset of those kinds.
+		Far more efficient than ``{ks:len(ms) for (ks,ms) in self.undecided_sets()}``,
+		assuming there are many moves with the same kindset.
 		'''
 		return self.__kindset.value_counts()
+
+	def undecided_sets(self):
+		'''
+		Obtain a ``dict`` of ``{frozenset(kinds): set(moves)}``
+
+		Each move is only included once across all sets.
+		A Move associated with multiple Kinds will be counted under a key with the
+		frozenset of those kinds.
+
+		Note that using this method largely defeats the purpose of IncrementalMoveCache,
+		because it must iterate over all moves. The method exists only for testing purposes.
+		'''
+		return {ks:set(vs) for (ks,vs) in self.__kindset.value_iters().items()}
 
 
 class ReverseDict:
@@ -119,17 +140,18 @@ class ReverseDict:
 		# we could do away with ``self.__index`` entirely.
 		self.__index = {}  # {(key,value): index of key in __keys[value]}
 		self.__value = {}  # {key: value}
-		self.__keys = defaultdict(list) # {value: [keys]}
+		self.__keys = {} # {value: [keys]}
 
 		# behave like dict constructor
 		if args and isinstance(args[0], ReverseDict):
-			args[0] = args[0].items()
+			(d,*rest) = args
+			args = (d.items(),) + tuple(rest)
 		for (k,v) in dict(*args, **kw).items():
 			self.__setitem__(k, v)
 
 	def lookup_keys(self, value):
 		''' Iterate through all keys for a value. '''
-		return self.__keys[value].__iter__()
+		return self.__keys.get(value, []).__iter__()
 
 	# common methods for containers
 	def __len__(self): return self.__value.__len__()
@@ -138,20 +160,26 @@ class ReverseDict:
 	def __nonzero__(self): return self.__value.__nonzero__()
 
 	# operators
-	def __eq__(self, other): return self.__value.__eq__(other.__value)
+	def __eq__(self, other):
+		return isinstance(other, ReverseDict) and self.__value.__eq__(other.__value)
 
 	# indexing
 	def __getitem__(self, key):
 		return self.__value.__getitem__(key)
+
 	def __delitem__(self, key):
 		if key in self: self.__delete_key(key)
 		else: raise KeyError
+
 	def __setitem__(self, key, value):
 		# clean out old value first
 		if key in self.__value:
 			self.__delete_key(key)
 
 		self.__value[key] = value
+
+		if value not in self.__keys:
+			self.__keys[value] = []
 
 		assert (key,value) not in self.__index
 		self.__index[(key,value)] = len(self.__keys[value])
@@ -160,6 +188,7 @@ class ReverseDict:
 	def get(self, key, default=None):
 		''' Obtain a value by key or get a default value '''
 		return self.__value.get(key, default)
+
 	def items(self):
 		''' Iterate through (key,value) pairs. '''
 		return self.__value.items()
@@ -177,14 +206,34 @@ class ReverseDict:
 			return default
 		assert False, "unreachable"
 
+	# a much more rigorous equality test than __eq__ which
+	# also looks at all of the redundant data structures
+	#
+	# Expects to only be run in debug mode.  Code outside of tests
+	# can ensure this is held by doing 'assert obj.debug_validate(other)'
+	# (the method always returns True for precisely this purpose)
 	def debug_validate(self, correct):
-		''' For debug.  Only use inside an ``assert`` statement. '''
+		# FIXME this method contains both self-integrity tests and comparisons
+		#  against another object, which feels like conflating goals.
+		# However, it is like this because I want these self-integrity tests
+		# to run during unittests
+
 		# compare to a gold standard
 		assert self.__value == correct.__value
-		assert self.__keys == correct.__keys
+		def comparable_keys(obj):
+			# canonicalize the form of obj.__keys.
+			# keep in mind we only require keys and values
+			#  to be hashable/equatable, not orderable.
+			return {v:set(ks) for (v,ks) in self.__keys.items()}
+		assert comparable_keys(self) == comparable_keys(correct)
+
+		# address the above note by further ensuring __keys has no dupes
+		all_keys = list(flat(self.__keys.values()))
+		assert len(all_keys) == len(set(all_keys))
 
 		# check integrity of index lookup
 		for (value,keys) in self.__keys.items():
+			assert keys, 'empty key list not deleted'
 			for (idx,key) in enumerate(keys):
 				assert self.__index[(key,value)] == idx
 
@@ -192,14 +241,16 @@ class ReverseDict:
 
 	def pop_arbitrary_key(self, value):
 		''' O(1) retrieval and removal of an arbitrarily chosen key for a given value. '''
+		if value not in self.__keys:
+			raise KeyError
 		key = self.__keys[value][0]
-		self.__remove_key(key)
+		self.__delete_key(key)
 		return key
 
 	def pop_random_key(self, value, rng=random):
 		''' O(1) retrieval and removal of a randomly chosen key for a given value. '''
 		key = self.get_random_key(value, rng)
-		self.__remove_key(key)
+		self.__delete_key(key)
 		return key
 
 	def get_random_key(self, value, rng=random):
@@ -214,6 +265,15 @@ class ReverseDict:
 		in the dictionary.
 		'''
 		return Counter({value:len(keys) for (value,keys) in self.__keys.items()})
+
+	def value_iters(self):
+		'''
+		Get a dict ``{value: iter of keys}`` giving all keys for each value.
+
+		One should assume that any modification to a ReverseDict invalidates all
+		of the iterators.
+		'''
+		return Counter({value:keys.__iter__() for (value,keys) in self.__keys.items()})
 
 	# Remove a key and all associated data
 	def __delete_key(self, key):
@@ -245,3 +305,242 @@ def pop_n_swap(seq, i):
 	(seq[i], seq[-1]) = (seq[-1], seq[i]) # seems to work fine for i == -1
 	return seq.pop()
 
+import unittest
+class ReverseDictTests(unittest.TestCase):
+
+	def setUp(self):
+		self.empty = ReverseDict()
+		self.three_dict = {'a': 'shared', 'b': 'shared', 'c': 'unique'}
+		self.three = ReverseDict(self.three_dict)
+		self.four_dict = {'a': 'shared', 'b': 'shared', 'c': 'unique', 'd': 'third'}
+		self.four = ReverseDict(self.four_dict)
+		self.fourB_dict = {'a': 'shared', 'b': 'third', 'c': 'unique', 'd': 'third'}
+		self.fourB = ReverseDict(self.fourB_dict)
+
+	def test_construction(self):
+		from itertools import permutations
+
+		# a bunch of identical fellows through various methods
+		a = ReverseDict(self.three_dict)   # (dict)
+		b = ReverseDict(**self.three_dict) # (key=value, ...)
+		c = ReverseDict(a)                 # (ReverseDict)
+		d = ReverseDict(self.three_dict.items()) # iterable of (key,value)
+		for s,t in permutations([a,b,c,d], r=2):
+			assert s.debug_validate(t)
+
+	def test_delegated(self):
+		# __len__
+		self.assertEqual(len(self.empty), 0)
+		self.assertEqual(len(self.three), 3)
+		# __iter__
+		self.assertSetEqual(set(self.empty), set())
+		self.assertSetEqual(set(self.three), set('abc'))
+		# __contains__
+		assert 'a' in self.three
+		assert 'shared' not in self.three
+		assert 'a' not in self.empty
+		# __nonzero__
+		assert not self.empty
+		assert self.three
+		# items
+		self.assertDictEqual(dict(self.empty.items()), {})
+		self.assertDictEqual(dict(self.three.items()), self.three_dict)
+		# get
+		self.assertEqual(self.empty.get('a'), None)
+		self.assertEqual(self.empty.get('a',3), 3)
+		self.assertEqual(self.three.get('b',4), 'shared')
+
+	def test_value_counts(self):
+		self.assertDictEqual(self.empty.value_counts(), {})
+		self.assertDictEqual(self.three.value_counts(), {'shared': 2, 'unique': 1})
+
+	def test_get_random_key(self):
+		self.assertRaises(KeyError, self.empty.get_random_key, 'foo')
+		self.assertRaises(KeyError, self.three.get_random_key, 'foo')
+
+		picks = [self.three.get_random_key('shared') for _ in range(100)]
+		self.assertSetEqual(set(picks), set('ab'))
+
+		picks = [self.three.get_random_key('unique') for _ in range(100)]
+		self.assertSetEqual(set(picks), set('c'))
+
+	def test_getitem(self):
+		self.assertRaises(KeyError, self.three.__getitem__, 'w')
+		self.assertEqual(self.three['b'], 'shared')
+
+	def test_setitem(self):
+		assert len(self.three) == 3
+		self.assertRaises(AssertionError, self.three.debug_validate, self.four)
+
+		# __setitem__ - key not present
+		self.three['d'] = 'third'
+		assert len(self.three) == 4
+		assert self.three.debug_validate(self.four)
+
+		# __setitem__ - key already present
+		self.assertRaises(AssertionError, self.three.debug_validate, self.fourB)
+		self.three['b'] = 'third'
+		assert len(self.three) == 4
+		assert self.three.debug_validate(self.fourB)
+
+	def test_delitem(self):
+		# delete only key with value
+		self.assertRaises(AssertionError, self.four.debug_validate, self.three)
+		del self.four['d']
+		assert self.four.debug_validate(self.three)
+		self.assertSetEqual(set(self.four.value_counts()), set(['shared','unique']))
+
+		# delete one key when multiple exist for value
+		del self.four['a']
+		self.assertSetEqual(set(self.four.value_counts()), set(['shared','unique']))
+		assert self.four.debug_validate(ReverseDict({ 'b': 'shared', 'c': 'unique' }))
+
+		# delete non-existing
+		self.assertRaises(KeyError, self.four.__delitem__, 'w')
+
+	def test_del_swap_remove(self):
+		# NOTE: test assumes that the order of __keys is deterministic for
+		#  a fixed sequence of setitems
+
+		# construct a ReverseDict like self.three, but do it manually to ensure
+		#  deterministic order of keys
+		def make_new_dict(a=True, b=True):
+			d = ReverseDict()
+			if a: d['a'] = 'shared'
+			if b: d['b'] = 'shared'
+			d['c'] = 'unique'
+			return d
+
+		# One of these will internally perform a swap-removal, the other will not.
+		# Doesn't matter which is which; we just want both cases to work correctly.
+		d_a = make_new_dict()
+		del d_a['a']
+		assert d_a.debug_validate(make_new_dict(a=False))
+
+		d_b = make_new_dict()
+		del d_b['b']
+		assert d_b.debug_validate(make_new_dict(b=False))
+
+	def test_lookup_keys(self):
+		keys = sorted(self.three.lookup_keys('shared'))
+		self.assertListEqual(keys, ['a','b'])
+		keys = sorted(self.three.lookup_keys('unique'))
+		self.assertListEqual(keys, ['c'])
+		keys = sorted(self.three.lookup_keys('foo'))
+		self.assertListEqual(keys, [])
+
+	def test_pop(self):
+		# Missing keys, with/without defaults
+		self.assertRaises(KeyError, self.three.pop, 'w')
+		self.assertEqual(self.three.pop('w', None), None)
+		self.assertEqual(self.three.pop('w', 7), 7)
+
+		self.assertEqual(self.three.pop('b'), 'shared')
+		self.assertEqual(self.three.pop('c'), 'unique')
+		self.assertEqual(self.three.pop('a'), 'shared')
+		assert self.three.debug_validate(self.empty)
+
+
+	def do_pop_xxx_keys(self, meth):
+		self.assertRaises(KeyError, meth, self.empty, 'foo')
+		self.assertRaises(KeyError, meth, self.three, 'foo')
+		popped = [
+			meth(self.three, 'shared'),
+			meth(self.three, 'shared'),
+			meth(self.three, 'unique'),
+		]
+		self.assertSetEqual(set(popped[:2]), set('ab'))
+		self.assertEqual(set(popped[2]), set('c'))
+		assert self.three.debug_validate(self.empty)
+
+	def test_pop_random_key(self):
+		self.do_pop_xxx_keys(ReverseDict.pop_random_key)
+
+	def test_pop_arbitrary_key(self):
+		self.do_pop_xxx_keys(ReverseDict.pop_arbitrary_key)
+
+
+class IncrementalMoveCacheTests(unittest.TestCase):
+
+	def make_mc(self, **contents):
+		from itertools import product
+
+		mc = IncrementalMoveCache()
+		for (kinds, moves) in contents.items():
+			for (kind, move) in product(kinds, moves):
+				mc.add(move, kind)
+
+		self.validate(mc, **contents)
+		return mc
+
+	def validate(self, mc, **expected_contents):
+		expected = {}
+		for (kinds, moves) in expected_contents.items():
+			expected[frozenset(kinds)] = set(moves)
+
+		self.assertDictEqual(mc.undecided_sets(), expected)
+
+	def test_add(self):
+		# empty
+		mc = IncrementalMoveCache()
+		self.validate(mc)
+
+		# brand new move with brand new kind
+		mc.add('a', 'A')
+		self.validate(mc, A='a')
+
+		# brand new move with old kind
+		mc.add('b', 'A')
+		self.validate(mc, A='ab')
+
+		# add new kind to existing move
+		mc.add('a', 'B')
+		self.validate(mc, AB='a', A='b')
+
+		# two guys with a shared kindset
+		mc.add('b', 'B')
+		self.validate(mc, AB='ab')
+
+	def test_clear_one(self):
+		mc = self.make_mc(AB='ab')
+
+		# clear one kind from move with many
+		mc.clear_one('a', 'A')
+		self.validate(mc, AB='b', B='a')
+
+		# clear only kind for move
+		mc.clear_one('a', 'B')
+		self.validate(mc, AB='b')
+
+	def test_mutation_errors(self):
+		mc = self.make_mc(AB='b', A='a')
+		self.assertRaises(ValueError, mc.add, 'b', 'A') # kind already there
+		self.assertRaises(ValueError, mc.clear_one, 'b', 'C') # move present, but without kind
+		self.assertRaises(ValueError, mc.clear_one, 'a', 'C') # move not present
+		# make sure nothing changed
+		self.validate(mc, AB='b', A='a')
+
+	def test_validate(self):
+		# make sure validate isn't trivially returning true
+		mc = self.make_mc(AB='b', A='a')
+		self.assertRaises(AssertionError, self.validate, mc, AB='b', A='d')
+		self.assertRaises(AssertionError, self.validate, mc, B='b', A='a')
+
+	def test_clear_all(self):
+		mc = self.make_mc(AB='b', A='a')
+
+		# clear move with multiple kinds
+		mc.clear_all('b')
+		self.validate(mc, A='a')
+
+		# clear move with one kind
+		mc.clear_all('a')
+		self.validate(mc)
+
+		# "clear" move with no kinds
+		mc.clear_all('c')
+		self.validate(mc)
+
+def flat(it):
+	for x in it:
+		yield from x

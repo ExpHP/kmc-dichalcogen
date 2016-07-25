@@ -8,7 +8,7 @@ from functools import partial
 
 #from .simple import SimpleState as State
 #from .simple import SimpleModel as Model
-from .state import RuleSet as Model
+#from .state import GoldStandardRuleSet as Model
 from .state import State
 from .state import EventManager
 from . import kmc
@@ -16,6 +16,8 @@ from . import kmc
 PROG = 'demo1'
 
 def main():
+	import logging
+
 	parser = argparse.ArgumentParser('python -m ' + PROG, description='')
 
 	parser.add_argument('-d', '--dimensions', metavar='ARM,ZAG',
@@ -28,11 +30,24 @@ def main():
 		help='record profiling data, readable by the pstats module')
 	parser.add_argument('-p', '--profile', action='store_true',
 		help='display profiling data')
+	parser.add_argument('-D', '--debug', action='store_true',
+		help='display debug logs, hide standard output')
+	parser.add_argument('-g', '--gold-standard', action='store_true',
+		help='use gold standard ruleset (debugging flag)')
 	args = parser.parse_args()
+
+	if args.debug:
+		logging.getLogger().setLevel(10)
+
+	global Model
+	if args.gold_standard:
+		from .state import GoldStandardRuleSet as Model
+	else:
+		from .state import RuleSet as Model
 
 	def myrun():
 		run(
-			ofile = sys.stdout,
+			ofile = DevNull() if args.debug else sys.stdout,
 			nsteps = args.steps,
 			dims = args.dimensions,
 		)
@@ -43,6 +58,9 @@ def main():
 		with_profiling(myrun, stats_out, text_out)
 	else:
 		myrun()
+
+class DevNull:
+	def write(self, *a, **kw): pass
 
 #-----------------------------
 
@@ -70,7 +88,12 @@ def run(ofile, nsteps, dims):
 	ofile.write('\n')
 
 def run_steps(model, init_state, nsteps):
-	state = init_state.clone()
+	# FIXME: This currently modifies the input state object, which was never the intent;
+	#        The clone() was commented out as a workaround for a bug where cloning the
+	#         state somehow also seems to create a copy of the IncrementalNodeCache.
+	#        (State apparently contains some members that it really ought not to!)
+	state = init_state#.clone()
+
 	for _ in range(nsteps):
 		(edges, metadata) = model.edges(state)
 		kind = kmc.weighted_choice(edges)

@@ -3,6 +3,8 @@ from __future__ import division
 
 from collections import defaultdict
 import itertools
+import logging
+from termcolor import colored
 
 from .incremental import IncrementalMoveCache
 import hexagonal as hex
@@ -32,6 +34,11 @@ class State:
 
 	def __init__(self, dim, emit):
 		self.grid = Grid(dim)
+		# FIXME so this was a bad idea; surprisingly, it looks like bound member
+		#  functions can be pickled; unsurprisingly, it needs to create new copies
+		#  of the bound class objects when unpickling.
+		# As a result, the presence of the emit member indirectly causes clone()
+		#  to create a brand new IncrementalNodeCache.
 		self.emit = emit
 		self.__vacancies = {}
 		self.__trefoils = {}
@@ -168,22 +175,24 @@ class State:
 		return id
 
 	def pop_vacancy(self, node):
-		self.emit('del_vacancy', self, node=node)
+		self.emit('del_vacancy', self, node)
 
-		id = self.__find_vacancy(self, node)
+		id = self.__find_vacancy(node)
 		vacancy = self.__vacancies.pop(id)
-		node = vacancy['where']
 		self.__nodes[node]['status'] = STATUS_NO_VACANCY
 		self.__nodes[node]['owner'] = None
 
 		return vacancy
 
 	def pop_trefoil(self, nodes):
-		self.emit('del_trefoil', self, nodes=nodes)
+		nodes = frozenset(map(tuple, nodes))
+		assert len(nodes) == 3
 
-		id = self.__find_trefoil(self, nodes)
+		self.emit('del_trefoil', self, nodes)
+
+		id = self.__find_trefoil(nodes)
 		trefoil = self.__trefoils.pop(id)
-		for node in trefoil['where']:
+		for node in nodes:
 			self.__nodes[node]['status'] = STATUS_NO_VACANCY
 			self.__nodes[node]['owner'] = None
 
@@ -191,7 +200,7 @@ class State:
 
 	def __find_vacancy(self, node):
 		id = self.__nodes[node]['owner']
-		assert self.__trefoils[id]['where'] == node
+		assert self.__vacancies[id]['where'] == node
 		return id
 
 	def __find_trefoil(self, nodes):
@@ -242,7 +251,7 @@ class RuleSet:
 		self.weight = dict(kw_pairs)
 
 	# Returns ([(obj, weight)], Metadata), where Metadata is just something
-	# requried by perform()
+	# required by perform()
 	def edges(self, state):
 		(counts, sources) = self.move_cache.randomly_decided_counts()
 
@@ -257,6 +266,56 @@ class RuleSet:
 		# decide a single move
 		counts, sources = metadata
 		(rule, move) = self.move_cache.random_by_kind(kind, sources, check_total=counts[kind])
+
+		# old function of perform
+		rule.perform(move, state)
+		return rule.info(move, kind)
+
+
+# same API as RuleSet, but regenerates the move cache from scratch every turn.
+#
+# it is an utter total hack; methods may have unpredictable side-effects
+#
+# FIXME there is some very rough copypasta between this and RuleSet that will
+#       be difficult to keep in sync.
+class GoldStandardRuleSet:
+	''' extremely temperamental debugging object that provides non-incremental ruleset updates '''
+	def __init__(self, init_state, event_manager):
+		self.event_man = event_manager
+		self.__refresh(init_state)
+
+		# kinds and weights
+		kw_pairs = list(flat(x.kinds().items() for x in self.rules))
+		assert len(kw_pairs) == len(set(k for (k,w) in kw_pairs)), 'kinds not unique!'
+
+		self.weight = dict(kw_pairs)
+
+	def __refresh(self, state):
+		self.event_man.clear_all_listeners()
+		self.move_cache = IncrementalMoveCache()
+		self.rules = [
+			RuleCreateVacancy(state, self.event_man, self.move_cache),
+			RuleFillVacancy(state, self.event_man, self.move_cache),
+		]
+
+	# Returns ([(obj, weight)], Metadata), where Metadata is just something
+	# required by perform()
+	def edges(self, state):
+		self.__refresh(state)
+		(counts, sources) = self.move_cache.randomly_decided_counts()
+
+		def weighted_kinds():
+			for kind,count in counts.items():
+				yield (kind, count * self.weight[kind])
+
+		metadata = (counts, sources)
+		return (list(weighted_kinds()), metadata)
+
+	def perform_move(self, kind, state, metadata):
+		# decide a single move
+		counts, sources = metadata
+		(rule, move) = self.move_cache.random_by_kind(kind, sources, check_total=counts[kind])
+
 		# old function of perform
 		rule.perform(move, state)
 		return rule.info(move, kind)
@@ -324,11 +383,11 @@ class Rule:
 		self.move_cache.add((self, move), kind)
 
 	def clear_move(self, move):
+		assert self.move_cache.has_move((self, move))
 		self.move_cache.clear_all((self, move))
 
 class RuleCreateVacancy(Rule):
 	def perform(self, node, state):
-		print(self.move_cache.randomly_decided_counts()[0])
 		state.new_vacancy(node)
 
 	def info(self, node, kind):
@@ -338,8 +397,9 @@ class RuleCreateVacancy(Rule):
 		}
 	def kinds(self): return { type(self): 1.0 }
 	def initialize_moves(self, state):
-		for node in state.grid.nodes():
-			self.add_move(node)
+		for (node,status) in state.nodes_with_status():
+			if status is STATUS_NO_VACANCY:
+				self.add_move(node)
 	def on_new_vacancy(self, state, node): self.clear_move(node)
 	def on_del_vacancy(self, state, node): self.add_move(node)
 	def on_new_trefoil(self, state, nodes): [self.clear_move(x) for x in nodes]
@@ -355,7 +415,10 @@ class RuleFillVacancy(Rule):
 			'node':   node,
 		}
 	def kinds(self): return { type(self): 1.0 }
-	def initialize_moves(self, state): pass
+	def initialize_moves(self, state):
+		for (node,status) in state.nodes_with_status():
+			if status is STATUS_DIVACANCY:
+				self.add_move(node)
 	def on_new_vacancy(self, state, node): self.add_move(node)
 	def on_del_vacancy(self, state, node): self.clear_move(node)
 	def on_new_trefoil(self, state, nodes): pass
@@ -393,11 +456,15 @@ class EventManager:
 		import warnings
 		if not self.__handlers[symbol]:
 			warnings.warn('No event handlers for %s' % symbol)
+		logging.debug('EVENT: %s -- %r', colored(symbol, 'yellow'), args)
 		for func in self.__handlers[symbol]:
 			func(*args)
 
 	def add_listener(self, symbol, func):
 		self.__handlers[symbol].add(func)
+
+	def clear_all_listeners(self):
+		self.__handlers = defaultdict(set)
 
 
 

@@ -15,7 +15,6 @@ class IncrementalMoveCache():
 	def __init__(self):
 		self.__kindset = ReverseDict() # { move: kindset }
 
-	@debug('MoveCache.', member=True)
 	def add(self, move, kind):
 		# rip the move out
 		kindset = self.__kindset.pop(move, frozenset())
@@ -41,9 +40,11 @@ class IncrementalMoveCache():
 		if kindset:
 			self.__kindset[move] = kindset
 
-	@debug('MoveCache.', member=True)
 	def clear_all(self, move):
 		self.__kindset.pop(move, frozenset())
+
+	def has_move(self, move):
+		return move in self.__kindset
 
 	def randomly_decided_counts(self):
 		'''

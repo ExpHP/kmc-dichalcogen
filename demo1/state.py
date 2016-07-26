@@ -7,6 +7,7 @@ import logging
 from termcolor import colored
 
 from .incremental import IncrementalMoveCache
+from . import kmc
 import hexagonal as hex
 
 try: import cPickle as pickle
@@ -224,6 +225,11 @@ class State:
 # In such cases, these similar Moves are said to be of the same Kind.
 
 
+# FIXME Role of this class is once again muddied.
+# Rather than storing a state, it has methods which accept (and modify) a state.
+# However, thanks to incrementalization, its behavior is no longer correct for
+#  arbitrary states (only the one it expects to be given); so the state may as
+#  well just be a member of the object.
 class RuleSet:
 	def __init__(self, init_state, event_manager):
 		self.move_cache = IncrementalMoveCache()
@@ -238,26 +244,51 @@ class RuleSet:
 
 		self.weight = dict(kw_pairs)
 
-	# Returns ([(obj, weight)], Metadata), where Metadata is just something
-	# required by perform()
-	def edges(self, state):
+	def rate(self, rule, kind):
+		# FIXME should be based on energy barrier and boltzmann
+		return rule.kinds()[kind]
+
+	# FIXME HACK shouldn't exist
+	def rule_for_kind(self, kind):
+		def inner():
+			for rule in self.rules:
+				if kind in rule.kinds():
+					yield rule
+		rule, = inner()
+		return rule
+
+	def perform_random_move(self, state):
+		'''
+		Select and perform a random change to occur to the state.
+
+		The input state object will be mutated.
+		'''
+		from math import fsum
+
+		# Count how many moves there are of each kind,
+		# randomly resolving kinds for ambiguous moves.
 		(counts, sources) = self.move_cache.randomly_decided_counts()
 
-		def weighted_kinds():
-			for kind,count in counts.items():
-				yield (kind, count * self.weight[kind])
+		# Choose which kind of move should occur
+		k_w_pairs = [(kind, count * self.rate(self.rule_for_kind(kind), kind))
+		             for (kind,count) in counts.items()]
 
-		metadata = (counts, sources)
-		return (list(weighted_kinds()), metadata)
+		chosen_kind = kmc.weighted_choice(k_w_pairs)
 
-	def perform_move(self, kind, state, metadata):
-		# decide a single move
-		counts, sources = metadata
-		(rule, move) = self.move_cache.random_by_kind(kind, sources, check_total=counts[kind])
+		# Choose a single move of this kind
+		# (moves of the same kind share the same rate, so the choice is uniform)
+		(rule, move) = self.move_cache.random_by_kind(chosen_kind,
+			sources, check_total=counts[chosen_kind])
 
-		# old function of perform
-		rule.perform(move, state)
-		return rule.info(move, kind)
+		# Perform it.
+		rule.perform(move, state) # CAUTION: Mutates the State and MoveCache
+
+		# Produce a summary of what happened.
+		return {
+			'move': rule.info(move, chosen_kind),
+			'rate': self.rate(rule, chosen_kind),
+			'total_rate': fsum(r for (_,r) in k_w_pairs),
+		}
 
 
 # same API as RuleSet, but regenerates the move cache from scratch every turn.
@@ -387,7 +418,7 @@ class RuleCreateVacancy(Rule):
 			'action': 'create_vacancy',
 			'node':   node,
 		}
-	def kinds(self): return { type(self): 1.0 }
+	def kinds(self): return { type(self): 2.0 }
 	def initialize_moves(self, state):
 		for (node,status) in state.nodes_with_status():
 			if status is STATUS_NO_VACANCY:

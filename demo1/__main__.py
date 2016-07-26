@@ -87,6 +87,7 @@ def run(ofile, nsteps, dims):
 
 	ofile.write('\n')
 
+# FIXME function is kind of pointless now that model does everything
 def run_steps(model, init_state, nsteps):
 	# FIXME: This currently modifies the input state object, which was never the intent;
 	#        The clone() was commented out as a workaround for a bug where cloning the
@@ -95,11 +96,7 @@ def run_steps(model, init_state, nsteps):
 	state = init_state#.clone()
 
 	for _ in range(nsteps):
-		(edges, metadata) = model.edges(state)
-		kind = kmc.weighted_choice(edges)
-
-		# warning: this mutates state
-		yield model.perform_move(kind=kind, state=state, metadata=metadata)
+		yield model.perform_random_move(state) # NOTE: Mutates everything
 
 class write_enclosing:
 	'''

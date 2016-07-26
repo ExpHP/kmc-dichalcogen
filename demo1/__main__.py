@@ -6,9 +6,6 @@ import sys
 import argparse
 from functools import partial
 
-#from .simple import SimpleState as State
-#from .simple import SimpleModel as Model
-#from .state import GoldStandardRuleSet as Model
 from .state import State
 from .state import EventManager
 from . import kmc
@@ -39,11 +36,12 @@ def main():
 	if args.debug:
 		logging.getLogger().setLevel(10)
 
-	global Model
+	# FIXME now that I think about it why is GoldStandard implemented through a class hack?
+	global KmcSim
 	if args.gold_standard:
-		from .state import GoldStandardRuleSet as Model
+		from .state import GoldStandardRuleSet as KmcSim
 	else:
-		from .state import RuleSet as Model
+		from .state import RuleSet as KmcSim
 
 	def myrun():
 		run(
@@ -69,7 +67,7 @@ def run(ofile, nsteps, dims):
 
 	event_manager = EventManager()
 	init_state = State(dims, emit=event_manager.emit)
-	model = Model(init_state, event_manager)
+	sim = KmcSim(init_state, event_manager)
 
 	# to write json incrementally we'll need to do a bit ourselves
 	with write_enclosing('{', '\n}', ofile):
@@ -80,23 +78,12 @@ def run(ofile, nsteps, dims):
 		with write_enclosing(' "events": [\n  ', '\n ]', ofile):
 			# everything here is done with iterators for the sake of
 			# incremental output
-			infos = run_steps(model, init_state, nsteps)
+			infos = (sim.perform_random_move() for _ in range(nsteps))
 			strs = (json.dumps(x, sort_keys=True) for x in infos)
 			for s in with_separator(',\n  ', strs):
 				ofile.write(s)
 
 	ofile.write('\n')
-
-# FIXME function is kind of pointless now that model does everything
-def run_steps(model, init_state, nsteps):
-	# FIXME: This currently modifies the input state object, which was never the intent;
-	#        The clone() was commented out as a workaround for a bug where cloning the
-	#         state somehow also seems to create a copy of the IncrementalNodeCache.
-	#        (State apparently contains some members that it really ought not to!)
-	state = init_state#.clone()
-
-	for _ in range(nsteps):
-		yield model.perform_random_move(state) # NOTE: Mutates everything
 
 class write_enclosing:
 	'''

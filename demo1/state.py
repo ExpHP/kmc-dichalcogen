@@ -225,18 +225,17 @@ class State:
 # In such cases, these similar Moves are said to be of the same Kind.
 
 
-# FIXME Role of this class is once again muddied.
-# Rather than storing a state, it has methods which accept (and modify) a state.
-# However, thanks to incrementalization, its behavior is no longer correct for
-#  arbitrary states (only the one it expects to be given); so the state may as
-#  well just be a member of the object.
+# FIXME Name is dumb
 class RuleSet:
-	def __init__(self, init_state, event_manager):
+	def __init__(self, initial_state, event_manager):
 		self.move_cache = IncrementalMoveCache()
 		self.rules = [
-			RuleCreateVacancy(init_state, event_manager, self.move_cache),
-			RuleFillVacancy(init_state, event_manager, self.move_cache),
+			RuleCreateVacancy(initial_state, event_manager, self.move_cache),
+			RuleFillVacancy(initial_state, event_manager, self.move_cache),
 		]
+		# FIXME should clone() to avoid mutating input,
+		#  but State.clone is currently b0rked.
+		self.state = initial_state#.clone()
 
 		# kinds and weights
 		kw_pairs = list(flat(x.kinds().items() for x in self.rules))
@@ -257,7 +256,7 @@ class RuleSet:
 		rule, = inner()
 		return rule
 
-	def perform_random_move(self, state):
+	def perform_random_move(self):
 		'''
 		Select and perform a random change to occur to the state.
 
@@ -281,7 +280,7 @@ class RuleSet:
 			sources, check_total=counts[chosen_kind])
 
 		# Perform it.
-		rule.perform(move, state) # CAUTION: Mutates the State and MoveCache
+		rule.perform(move, self.state) # CAUTION: Mutates the State and MoveCache
 
 		# Produce a summary of what happened.
 		return {
@@ -291,54 +290,23 @@ class RuleSet:
 		}
 
 
-# same API as RuleSet, but regenerates the move cache from scratch every turn.
-#
-# it is an utter total hack; methods may have unpredictable side-effects
-#
-# FIXME there is some very rough copypasta between this and RuleSet that will
-#       be difficult to keep in sync.
-class GoldStandardRuleSet:
+class GoldStandardRuleSet(RuleSet):
 	''' extremely temperamental debugging object that provides non-incremental ruleset updates '''
-	def __init__(self, init_state, event_manager):
-		self.event_man = event_manager
-		self.__refresh(init_state)
+	def __init__(self, initial_state, *args, **kw):
+		# We're just going to... hang on to these.
+		# Certainly nothing suspicious going on around here, nope!
+		self.init_args = args
+		self.init_kw   = kw
+		super().__init__(initial_state, *args, **kw)
 
-		# kinds and weights
-		kw_pairs = list(flat(x.kinds().items() for x in self.rules))
-		assert len(kw_pairs) == len(set(k for (k,w) in kw_pairs)), 'kinds not unique!'
+	def __reinitialize_move_cache(self):
+		# ... <_< ...
+		# ... >_> ...
+		super().__init__(self.state, *self.init_args, **self.init_kw)
 
-		self.weight = dict(kw_pairs)
-
-	def __refresh(self, state):
-		self.event_man.clear_all_listeners()
-		self.move_cache = IncrementalMoveCache()
-		self.rules = [
-			RuleCreateVacancy(state, self.event_man, self.move_cache),
-			RuleFillVacancy(state, self.event_man, self.move_cache),
-		]
-
-	# Returns ([(obj, weight)], Metadata), where Metadata is just something
-	# required by perform()
-	def edges(self, state):
-		self.__refresh(state)
-		(counts, sources) = self.move_cache.randomly_decided_counts()
-
-		def weighted_kinds():
-			for kind,count in counts.items():
-				yield (kind, count * self.weight[kind])
-
-		metadata = (counts, sources)
-		return (list(weighted_kinds()), metadata)
-
-	def perform_move(self, kind, state, metadata):
-		# decide a single move
-		counts, sources = metadata
-		(rule, move) = self.move_cache.random_by_kind(kind, sources, check_total=counts[kind])
-
-		# old function of perform
-		rule.perform(move, state)
-		return rule.info(move, kind)
-
+	def perform_random_move(self):
+		self.__reinitialize_move_cache()
+		return super().perform_random_move()
 
 
 # FIXME it bothers me that Rules use inheritance.

@@ -117,30 +117,7 @@ class State:
 	def trefoils_with_id(self): return self.__trefoils.items()
 
 	#------------------------------------------
-	# High-level mutators
-	# Each corresponds to a rule.
-
-	# emit is a function that sends update messages to rules
-
-	def make_vacancy(self, node):
-		return self.gen_vacancy(node)
-
-	def move_vacancy(self, id, dest):
-		self.pop_vacancy(id)
-		return self.gen_vacancy(dest)
-
-	def make_trefoil_from_vacancies(self, ids):
-		vacancies = [self.del_vacancy(i) for i in ids]
-		nodes = [x['where'] for x in vacancies]
-		return self.new_trefoil(nodes)
-
-	def make_vacancies_from_trefoil(self, id):
-		trefoil = self.del_trefoil(id)
-		nodes = trefoil['where']
-		return [self.new_vacancy(node) for node in nodes]
-
-	#------------------------------------------
-	# Mid-level mutators
+	# Public mutators
 	# These are discrete actions which modify the State and perform
 	# incrementalized updates to all caches, so that all objects
 	# are left in a consistent state.
@@ -151,6 +128,17 @@ class State:
 	# * Update the primary storage (__vacancies, __trefoils)
 	# * Update the __nodes cache (this is not done via `emit` because other
 	#   objects depend on the node cache).
+
+	# NOTES on implementation constraints:
+	# * These methods should be regarded as the primitive operations for
+	#   modifying the State.  Any other operations are composed of these.
+	# * They must be members of State so that they can modify private members.
+	# * They contain 'emit' calls to ensure that all composite operations
+	#   send the necessary messages.
+	# * In theory, the emit member could be removed, and another object with a
+	#   parallel set of methods could first call emit and then call these methods.
+	#   But then composite operations would have to be implemented on that object
+	#   as well; not this class.
 
 	def new_vacancy(self, node):
 		id = self.__consume_id()
@@ -322,7 +310,11 @@ class GoldStandardRuleSet:
 
 
 
-
+# FIXME it bothers me that Rules use inheritance.
+# Really, a Rule is meant to be nothing more than a bundle of callbacks
+#  (some which update move_cache, others which update the state,
+#   others which read config; the one thing which unifies them
+#   is that they are associated with a single type of physical process)
 
 class Rule:
 	def __init__(self, initial_state, event_man, move_cache):

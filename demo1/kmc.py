@@ -4,6 +4,18 @@ import operator
 
 __all__ = ['weighted_choice']
 
+# NOTE: pretty much this whole file could be replaced with
+#  something along the lines of:
+#
+#    values,weights = zip(*choices)
+#    weights = np.array(weights)/math.fsum(weights)
+#    values = turn_list_of_tuples_into_1d_array_of_object_by_some_obscene_hack(values)
+#    return np.random.choice(values, p=weights)
+#
+# Though this would ever-so-slightly impact the probability
+# distribution in an unclear manner. (also, it would require
+# aforementioned "obscene hack")
+
 # weighted_choice :: [(value, weight)] -> value
 def weighted_choice(choices):
 

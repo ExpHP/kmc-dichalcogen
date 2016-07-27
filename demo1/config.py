@@ -1,6 +1,6 @@
 
-from . import state
-from .state import RuleSpec
+from . import sim
+from .sim import RuleSpec
 
 __all__ = ['parse']
 
@@ -22,7 +22,7 @@ def consume__rule_specs(config):
 		except KeyError: raise RuntimeError('config missing required section: rules')
 
 		for name in list(rules_map):
-			try: klass = getattr(state, name)
+			try: klass = getattr(sim, name)
 			except KeyError: raise RuntimeError('unknown rule: %s' % name)
 
 			yield build_rule_spec(name, klass, rules_map.pop(name))
@@ -44,7 +44,7 @@ def build_rule_spec(name, klass, rule_map):
 
 	# normalize shorthand for single-kind rule
 	if isinstance(the_map, (int,float)):
-		the_map = {state.DEFAULT_KIND: the_map}
+		the_map = {sim.DEFAULT_KIND: the_map}
 
 	# misc validation
 	if not isinstance(the_map, dict):

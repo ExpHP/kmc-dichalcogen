@@ -7,8 +7,7 @@ import argparse
 from functools import partial
 
 from .state import State
-from .state import EventManager
-from . import kmc
+from .sim import EventManager
 from . import config
 
 PROG = 'demo1'
@@ -43,9 +42,9 @@ def main():
 	# FIXME now that I think about it why is GoldStandard implemented through a class hack?
 	global KmcSim
 	if args.gold_standard:
-		from .state import GoldStandardRuleSet as KmcSim
+		from .sim import GoldStandardSim as KmcSim
 	else:
-		from .state import RuleSet as KmcSim
+		from .sim import IncrementalSim as KmcSim
 
 	import yaml
 	config_dict = yaml.load(args.CONFIG)

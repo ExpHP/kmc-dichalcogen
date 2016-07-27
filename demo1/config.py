@@ -44,7 +44,7 @@ def build_rule_spec(name, klass, rule_map):
 
 	# normalize shorthand for single-kind rule
 	if isinstance(the_map, (int,float)):
-		the_map = {'natural': the_map}
+		the_map = {state.DEFAULT_KIND: the_map}
 
 	# misc validation
 	if not isinstance(the_map, dict):

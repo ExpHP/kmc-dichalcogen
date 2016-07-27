@@ -1,10 +1,7 @@
 
 from __future__ import division
 
-from collections import defaultdict
 import itertools
-import logging
-from termcolor import colored
 
 from .incremental import IncrementalMoveCache
 from . import kmc
@@ -25,11 +22,9 @@ STATUS_NO_VACANCY = 0
 STATUS_DIVACANCY = 1
 STATUS_TREFOIL_PARTICIPANT = 2
 
-# Names identifying the layer to which a point vacancy belongs.
-# This is just kind of a "general idea".
-LAYER_DIVACANCY = 'both'
-LAYER_MONOVACANCY_1 = 'top'
-LAYER_MONOVACANCY_2 = 'bottom'
+# Every Rule has at least one kind; for those with one it is usually this:
+# (appears as config key, and as a possible value in MoveCache)
+DEFAULT_KIND = 'natural'
 
 class State:
 
@@ -64,8 +59,6 @@ class State:
 		}
 
 		for id, v in self.__vacancies.items():
-			assert v['layer'] == LAYER_DIVACANCY, ('looks like this function'
-				' (and all users of status functions) needs updating')
 			node = v['where']
 			cache[node]['status'] = STATUS_DIVACANCY
 			cache[node]['owner'] = id
@@ -239,27 +232,50 @@ class State:
 # FIXME Name is dumb
 class RuleSet:
 	def __init__(self, initial_state, rule_specs, event_manager):
-		self.rules = [
-			spec.make_rule(initial_state, temperature=300.)
-			for spec in rule_specs
-		]
-		for r in self.rules:
-			event_manager.add_listeners_from(r)
+		self.rule_specs = list(rule_specs)
+		self.event_manager = event_manager
+		self.initialize(initial_state)
 
-		# FIXME should clone() to avoid mutating input,
-		#  but State.clone is currently b0rked.
-		self.state = initial_state#.clone()
+	def initialize(self, state=None):
+		if state is not None:
+			# FIXME should clone() to avoid mutating input,
+			#  but State.clone is currently b0rked.
+			self.state = state
+
+		self.rules_and_rates = {}
+		for spec in self.rule_specs:
+			# FIXME temperature config
+			rule = spec.make_rule(self.state)
+			rates = spec.rates(temperature=300.)
+
+			# we can finally validate the kinds in the rule_spec now
+			#  that we have instantiated the rule...
+			self.__validate_kinds(rule, rates)
+
+			self.rules_and_rates[rule] = rates
+
+		for r in self.rules_and_rates:
+			self.event_manager.add_listeners_from(r)
+
+	@staticmethod
+	def __validate_kinds(rule, rates):
+		from warnings import warn
+		for kind in rule.kinds():
+			if kind not in rates:
+				raise RuntimeError('config: %s: Missing required rate for kind: %s' % (type(rule).__name__, kind))
+		for kind in rates:
+			if kind not in rule.kinds():
+				warn('config: %s: Unexpected kind: %s' % (type(rule).__name__, kind))
 
 	def rate(self, rule, kind):
-		# FIXME
-		return rule.kinds()[kind]
+		return self.rules_and_rates[rule][kind]
 
 	def __rule_kind_counts(self):
 		from collections import Counter
 		# Gather info on all kinds across all rules.
 		counts = Counter()
 		sources = {}
-		for rule in self.rules:
+		for rule in self.rules_and_rates:
 			# Count how many moves there are of each kind,
 			# randomly resolving kinds for ambiguous moves.
 			(rule_counts, rule_sources) = rule.move_cache.randomly_decided_counts()
@@ -302,21 +318,10 @@ class RuleSet:
 
 
 class GoldStandardRuleSet(RuleSet):
-	''' extremely temperamental debugging object that provides non-incremental ruleset updates '''
-	def __init__(self, initial_state, *args, **kw):
-		# We're just going to... hang on to these.
-		# Certainly nothing suspicious going on around here, nope!
-		self.init_args = args
-		self.init_kw   = kw
-		super().__init__(initial_state, *args, **kw)
-
-	def __reinitialize_move_cache(self):
-		# ... <_< ...
-		# ... >_> ...
-		super().__init__(self.state, *self.init_args, **self.init_kw)
-
+	''' a debugging object that provides non-incremental ruleset updates
+	which is perhaps slightly less temperamental than it used to be '''
 	def perform_random_move(self):
-		self.__reinitialize_move_cache()
+		super().initialize()
 		return super().perform_random_move()
 
 # FIXME move
@@ -349,23 +354,16 @@ class RuleSpec:
 		else:
 			return dict(self.__rates)
 
-	# FIXME HACK: I don't see why Rules need to know their own rate.
-	# Have RuleSet store RuleSpecs and eliminate the args to Rule
-	def make_rule(self, state, temperature):
-		rates = self.rates(temperature)
-		return self.__klass(state, rates, self.__init_kw)
+	def make_rule(self, state):
+		return self.__klass(state, self.__init_kw)
 
 # NOTE: The role of a Rule is a bit uncertain;
 # The original intent was for them to be stateless bundles of
 # callbacks, but they now have a stateful aspect (the move_cache).
 class Rule:
-	def __init__(self, initial_state, rates, init_kw):
+	def __init__(self, initial_state, init_kw):
 		self.move_cache = IncrementalMoveCache()
 		self.initialize_moves(initial_state)
-
-		# HACK FIXME rules should not store rates any more
-		rates[None] = rates.pop('natural')
-		self.__rates = rates
 
 		# Give additional keywords to subinit.
 		# These may come from config, so validate them.
@@ -392,20 +390,14 @@ class Rule:
 		raise NotImplementedError
 
 	def kinds(self):
-		''' Return a list of [(kind, individual_weight)] '''
-		return self.__rates # FIXME HACK
+		''' Return an iterable of the Kinds that the Rule may produce,
+		for checking against the list provided in the config. '''
+		return [DEFAULT_KIND]
 
-	# Callbacks to modify move_cache
-
-	# callback to set up the list of moves in move_cache from scratch
-	# (assuming there is initially nothing belonging to this rule in there)
-	def initialize_moves(self, initial_state): raise NotImplementedError
-
-	# callbacks to incrementally update the list of moves in move_cache
-	def on_new_vacancy(self, initial_state): raise NotImplementedError
-	def on_del_vacancy(self, initial_state): raise NotImplementedError
-	def on_new_trefoil(self, initial_state): raise NotImplementedError
-	def on_del_trefoil(self, initial_state): raise NotImplementedError
+	def initialize_moves(self, initial_state):
+		''' Callback to set up the list of moves in move_cache from scratch.
+		(assuming it is initially empty). '''
+		raise NotImplementedError
 
 	# make debug output more readible
 	def __repr__(self): return type(self).__name__
@@ -413,7 +405,7 @@ class Rule:
 	# convenience methods intended to be used by the Rule subclasses
 	# (move_cache mixin)
 
-	def add_move(self, move, kind=None):
+	def add_move(self, move, kind=DEFAULT_KIND):
 		self.move_cache.add(move, kind)
 
 	def clear_move(self, move):
@@ -424,11 +416,7 @@ class RuleCreateVacancy(Rule):
 	def perform(self, node, state):
 		state.new_vacancy(node)
 
-	# FIXME HACK kinds is disabled now until rates are removed from Rules.
-	# The new kinds() should just return a set for verifying the config
-	#  file against.
 	def info(self, node): return { 'node': node }
-#	def kinds(self): return { None: 2.0 }
 
 	def initialize_moves(self, state):
 		for (node,status) in state.nodes_with_status():
@@ -450,7 +438,6 @@ class RuleFillVacancy(Rule):
 		state.pop_vacancy(node)
 
 	def info(self, node): return { 'node': node }
-#	def kinds(self): return { None: 1.0 }
 
 	def initialize_moves(self, state):
 		for (node,status) in state.nodes_with_status():
@@ -476,7 +463,7 @@ class RuleMoveVacancy(Rule):
 	def info(self, move):
 		(old,new) = move
 		return { 'was': old, 'now': new }
-#	def kinds(self): return { None: 1.0 }
+	def kinds(self): return [DEFAULT_KIND]
 
 	def initialize_moves(self, state):
 		for n in state.grid.nodes():
@@ -498,6 +485,8 @@ class RuleMoveVacancy(Rule):
 					yield nbr
 
 VALID_EVENTS = set([
+	# FIXME should remove these other events if I still find no use for them
+	#       after a sufficient period of time; status_change is really handy
 	'pre_new_vacancy', 'post_new_vacancy',
 	'pre_del_vacancy', 'post_del_vacancy',
 	'pre_new_trefoil', 'post_new_trefoil',

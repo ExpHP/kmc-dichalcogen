@@ -236,22 +236,22 @@ class State:
 # vacancy will have the same energy barrier regardless of where it is placed.
 # In such cases, these similar Moves are said to be of the same Kind.
 
-
 # FIXME Name is dumb
 class RuleSet:
-	def __init__(self, initial_state, event_manager):
-		# FIXME these should be specified via config
+	def __init__(self, initial_state, rule_specs, event_manager):
 		self.rules = [
-			RuleCreateVacancy(initial_state, event_manager),
-			RuleFillVacancy(initial_state, event_manager),
-			RuleMoveVacancy(initial_state, event_manager),
+			spec.make_rule(initial_state, temperature=300.)
+			for spec in rule_specs
 		]
+		for r in self.rules:
+			event_manager.add_listeners_from(r)
+
 		# FIXME should clone() to avoid mutating input,
 		#  but State.clone is currently b0rked.
 		self.state = initial_state#.clone()
 
 	def rate(self, rule, kind):
-		# FIXME should be based on energy barrier and boltzmann
+		# FIXME
 		return rule.kinds()[kind]
 
 	def __rule_kind_counts(self):
@@ -319,16 +319,67 @@ class GoldStandardRuleSet(RuleSet):
 		self.__reinitialize_move_cache()
 		return super().perform_random_move()
 
+# FIXME move
+eV_PER_J = 6.24150913e18
+BOLTZMANN__J_PER_K  = 1.38064852e-23
+BOLTZMANN__eV_PER_K = BOLTZMANN__J_PER_K * eV_PER_J
+
+class RuleSpec:
+	''' Generates a Rule and describes its rates. '''
+	def __init__(self, rule_class, rates, rate_is_barrier, init_kw):
+		self.__klass = rule_class
+		self.__rates = rates
+		self.__rate_is_barrier = rate_is_barrier
+		self.__init_kw = init_kw
+
+	# FIXME behavior when barrier is specified is unusual...
+	def __rate_from_energy(self, barrier_ev, temperature_k):
+		from math import exp
+		return exp(-barrier_ev / (temperature_k * BOLTZMANN__eV_PER_K))
+	def __energy_from_rate(self, rate, temperature_k):
+		from math import log
+		return -temperature_k * BOLTZMANN__eV_PER_K * log(rate)
+
+	def rates(self, temperature):
+		if self.__rate_is_barrier:
+			return {
+				k:self.__rate_from_energy(v, temperature)
+				for (k,v) in self.__rates.items()
+			}
+		else:
+			return dict(self.__rates)
+
+	# FIXME HACK: I don't see why Rules need to know their own rate.
+	# Have RuleSet store RuleSpecs and eliminate the args to Rule
+	def make_rule(self, state, temperature):
+		rates = self.rates(temperature)
+		return self.__klass(state, rates, self.__init_kw)
+
 # NOTE: The role of a Rule is a bit uncertain;
 # The original intent was for them to be stateless bundles of
 # callbacks, but they now have a stateful aspect (the move_cache).
 class Rule:
-	def __init__(self, initial_state, event_man):
+	def __init__(self, initial_state, rates, init_kw):
 		self.move_cache = IncrementalMoveCache()
 		self.initialize_moves(initial_state)
 
-		# implementations of these required on each subclass
-		event_man.add_listeners_from(self)
+		# HACK FIXME rules should not store rates any more
+		rates[None] = rates.pop('natural')
+		self.__rates = rates
+
+		# Give additional keywords to subinit.
+		# These may come from config, so validate them.
+		from inspect import getargspec
+		(args,_,_,_) = getargspec(self.subinit)
+		bad_kw_args = set(init_kw) - (set(args) - set(['self']))
+		if bad_kw_args:
+			raise RuntimeError('unknown property of %s: %r' %
+				(type(self).__name__, bad_kw_args.pop()))
+		self.subinit(**init_kw)
+
+	def subinit(self):
+		''' Init for rule-specific properties. (i.e. store config flags) '''
+		pass
 
 	# API for the KMC engine
 
@@ -342,7 +393,7 @@ class Rule:
 
 	def kinds(self):
 		''' Return a list of [(kind, individual_weight)] '''
-		raise NotImplementedError
+		return self.__rates # FIXME HACK
 
 	# Callbacks to modify move_cache
 
@@ -373,8 +424,11 @@ class RuleCreateVacancy(Rule):
 	def perform(self, node, state):
 		state.new_vacancy(node)
 
+	# FIXME HACK kinds is disabled now until rates are removed from Rules.
+	# The new kinds() should just return a set for verifying the config
+	#  file against.
 	def info(self, node): return { 'node': node }
-	def kinds(self): return { None: 2.0 }
+#	def kinds(self): return { None: 2.0 }
 
 	def initialize_moves(self, state):
 		for (node,status) in state.nodes_with_status():
@@ -396,7 +450,7 @@ class RuleFillVacancy(Rule):
 		state.pop_vacancy(node)
 
 	def info(self, node): return { 'node': node }
-	def kinds(self): return { None: 1.0 }
+#	def kinds(self): return { None: 1.0 }
 
 	def initialize_moves(self, state):
 		for (node,status) in state.nodes_with_status():
@@ -422,7 +476,7 @@ class RuleMoveVacancy(Rule):
 	def info(self, move):
 		(old,new) = move
 		return { 'was': old, 'now': new }
-	def kinds(self): return { None: 1.0 }
+#	def kinds(self): return { None: 1.0 }
 
 	def initialize_moves(self, state):
 		for n in state.grid.nodes():

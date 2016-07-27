@@ -9,6 +9,7 @@ from functools import partial
 from .state import State
 from .state import EventManager
 from . import kmc
+from . import config
 
 PROG = 'demo1'
 
@@ -17,6 +18,9 @@ def main():
 
 	parser = argparse.ArgumentParser('python -m ' + PROG, description='')
 
+
+	parser.add_argument('CONFIG', type=argparse.FileType('r'),
+		help='path to config file')
 	parser.add_argument('-d', '--dimensions', metavar='ARM,ZAG',
 		default=[50,50],
 		type=delim_parser(positive_int, n=2, sep=','),
@@ -43,11 +47,16 @@ def main():
 	else:
 		from .state import RuleSet as KmcSim
 
+	import yaml
+	config_dict = yaml.load(args.CONFIG)
+
+	# bind arguments for ease of wrapping with profiler...
 	def myrun():
 		run(
 			ofile = DevNull() if args.debug else sys.stdout,
 			nsteps = args.steps,
 			dims = args.dimensions,
+			config_dict = config_dict,
 		)
 
 	if args.output_pstats or args.profile:
@@ -62,17 +71,23 @@ class DevNull:
 
 #-----------------------------
 
-def run(ofile, nsteps, dims):
+def run(ofile, nsteps, dims, config_dict):
 	import json
+
+	cfg = config.from_dict(config_dict)
 
 	event_manager = EventManager()
 	init_state = State(dims, emit=event_manager.emit)
-	sim = KmcSim(init_state, event_manager)
+	sim = KmcSim(init_state, cfg['rule_specs'], event_manager)
 
 	# to write json incrementally we'll need to do a bit ourselves
 	with write_enclosing('{', '\n}', ofile):
 		ofile.write('"grid": ')
 		json.dump(grid_info(dims), ofile, indent=2)
+		ofile.write(',\n')
+
+		ofile.write('"config": ')
+		json.dump(config_dict, ofile, indent=2)
 		ofile.write(',\n')
 
 		with write_enclosing(' "events": [\n  ', '\n ]', ofile):

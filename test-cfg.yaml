@@ -1,0 +1,12 @@
+rules:
+  RuleCreateVacancy:
+      rate: 30.20
+  RuleFillVacancy:
+      rate:
+        natural: 3.0
+  RuleMoveVacancy:
+      rate:
+        natural: 12.0
+        near-two: 3.0
+        near-one: 7.0
+        near-both: 7.0

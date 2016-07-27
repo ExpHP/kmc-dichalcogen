@@ -228,10 +228,9 @@ class State:
 # FIXME Name is dumb
 class RuleSet:
 	def __init__(self, initial_state, event_manager):
-		self.move_cache = IncrementalMoveCache()
 		self.rules = [
-			RuleCreateVacancy(initial_state, event_manager, self.move_cache),
-			RuleFillVacancy(initial_state, event_manager, self.move_cache),
+			RuleCreateVacancy(initial_state, event_manager),
+			RuleFillVacancy(initial_state, event_manager),
 		]
 		# FIXME should clone() to avoid mutating input,
 		#  but State.clone is currently b0rked.
@@ -247,45 +246,49 @@ class RuleSet:
 		# FIXME should be based on energy barrier and boltzmann
 		return rule.kinds()[kind]
 
-	# FIXME HACK shouldn't exist
-	def rule_for_kind(self, kind):
-		def inner():
-			for rule in self.rules:
-				if kind in rule.kinds():
-					yield rule
-		rule, = inner()
-		return rule
+	def __rule_kind_counts(self):
+		from collections import Counter
+		# Gather info on all kinds across all rules.
+		counts = Counter()
+		sources = {}
+		for rule in self.rules:
+			# Count how many moves there are of each kind,
+			# randomly resolving kinds for ambiguous moves.
+			(rule_counts, rule_sources) = rule.move_cache.randomly_decided_counts()
+
+			# Tag kinds with the rules that own them in the output counter.
+			counts += { (rule,kind):count for (kind,count) in rule_counts.items() }
+			sources[rule] = rule_sources
+
+		return (counts, sources)
 
 	def perform_random_move(self):
 		'''
 		Select and perform a random change to occur to the state.
 
-		The input state object will be mutated.
+		Outputs a dict summary.
 		'''
 		from math import fsum
 
-		# Count how many moves there are of each kind,
-		# randomly resolving kinds for ambiguous moves.
-		(counts, sources) = self.move_cache.randomly_decided_counts()
+		(counts, sources) = self.__rule_kind_counts()
 
-		# Choose which kind of move should occur
-		k_w_pairs = [(kind, count * self.rate(self.rule_for_kind(kind), kind))
-		             for (kind,count) in counts.items()]
-
-		chosen_kind = kmc.weighted_choice(k_w_pairs)
+		# Choose which rule and kind of move should occur
+		k_w_pairs = [((rule,kind), count * self.rate(rule, kind))
+		             for ((rule,kind), count) in counts.items()]
+		(rule, kind) = kmc.weighted_choice(k_w_pairs)
 
 		# Choose a single move of this kind
 		# (moves of the same kind share the same rate, so the choice is uniform)
-		(rule, move) = self.move_cache.random_by_kind(chosen_kind,
-			sources, check_total=counts[chosen_kind])
+		move = rule.move_cache.random_by_kind(kind,
+			sources[rule], check_total=counts[(rule,kind)])
 
 		# Perform it.
 		rule.perform(move, self.state) # CAUTION: Mutates the State and MoveCache
 
 		# Produce a summary of what happened.
 		return {
-			'move': rule.info(move, chosen_kind),
-			'rate': self.rate(rule, chosen_kind),
+			'move': dict(rule=type(rule).__name__, **rule.info(move)),
+			'rate': self.rate(rule, kind),
 			'total_rate': fsum(r for (_,r) in k_w_pairs),
 		}
 
@@ -308,20 +311,12 @@ class GoldStandardRuleSet(RuleSet):
 		self.__reinitialize_move_cache()
 		return super().perform_random_move()
 
-
-# FIXME it bothers me that Rules use inheritance.
-# Really, a Rule is meant to be nothing more than a bundle of callbacks
-#  (some which update move_cache, others which update the state,
-#   others which read config; the one thing which unifies them
-#   is that they are associated with a single type of physical process)
-
+# NOTE: The role of a Rule is a bit uncertain;
+# The original intent was for them to be stateless bundles of
+# callbacks, but they now have a stateful aspect (the move_cache).
 class Rule:
-	def __init__(self, initial_state, event_man, move_cache):
-		# FIXME this doesn't really belong here, it's just here for ergonomics
-		# (it's basically here as an implicit parameter to on_new_vacancy and friends,
-		#  via add_move and clear_move)
-		self.move_cache = move_cache
-
+	def __init__(self, initial_state, event_man):
+		self.move_cache = IncrementalMoveCache()
 		self.initialize_moves(initial_state)
 
 		# implementations of these required on each subclass
@@ -336,7 +331,7 @@ class Rule:
 		''' Perform the given move on the state, mutating it. '''
 		raise NotImplementedError
 
-	def info(self, move, kind):
+	def info(self, move):
 		''' Return a dict of serializable data describing the move, for output. '''
 		raise NotImplementedError
 
@@ -363,30 +358,18 @@ class Rule:
 	# (move_cache mixin)
 
 	def add_move(self, move, kind=None):
-		# For rules that only generate moves of a single kind, allow them to omit it
-		if kind is None: kind, = self.kinds()
-		else: assert any(k == kind for k in self.kinds())
-
-		# When giving the move to the MoveCache we tag it with ``self`` for two reasons:
-		#  * so that moves from two separate rules can't compare equal. (and thus their
-		#    representations can be simpler; like just a node for RuleCreateVacancy)
-		#  * so the KMC engine can perform the action.
-		self.move_cache.add((self, move), kind)
+		self.move_cache.add(move, kind)
 
 	def clear_move(self, move):
-		assert self.move_cache.has_move((self, move))
-		self.move_cache.clear_all((self, move))
+		assert self.move_cache.has_move(move)
+		self.move_cache.clear_all(move)
 
 class RuleCreateVacancy(Rule):
 	def perform(self, node, state):
 		state.new_vacancy(node)
 
-	def info(self, node, kind):
-		return {
-			'action': 'create_vacancy',
-			'node':   node,
-		}
-	def kinds(self): return { type(self): 2.0 }
+	def info(self, node): return { 'node': node }
+	def kinds(self): return { None: 2.0 }
 	def initialize_moves(self, state):
 		for (node,status) in state.nodes_with_status():
 			if status is STATUS_NO_VACANCY:
@@ -400,12 +383,8 @@ class RuleFillVacancy(Rule):
 	def perform(self, node, state):
 		state.pop_vacancy(node)
 
-	def info(self, node, kind):
-		return {
-			'action': 'fill_vacancy',
-			'node':   node,
-		}
-	def kinds(self): return { type(self): 1.0 }
+	def info(self, node): return { 'node': node }
+	def kinds(self): return { None: 1.0 }
 	def initialize_moves(self, state):
 		for (node,status) in state.nodes_with_status():
 			if status is STATUS_DIVACANCY:

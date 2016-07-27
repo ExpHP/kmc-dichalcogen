@@ -142,42 +142,52 @@ class State:
 	#   as well; not this class.
 
 	def new_vacancy(self, node):
-		id = self.__consume_id()
-		self.emit('new_vacancy', self, node)
+		self.emit('pre_new_vacancy', self, node)
+		self.emit('pre_status_change', self, [node])
 
+		id = self.__consume_id()
 		self.__vacancies[id] = {'where': tuple(node)}
 		self.__nodes[node]['status'] = STATUS_DIVACANCY
 		self.__nodes[node]['owner'] = id
-		return id
+
+		self.emit('post_new_vacancy', self, node)
+		self.emit('post_status_change', self, [node])
 
 	def new_trefoil(self, nodes):
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
 
-		id = self.__consume_id()
-		self.emit('new_trefoil', self, nodes)
+		self.emit('pre_new_trefoil', self, nodes)
+		self.emit('pre_status_change', self, nodes)
 
+		id = self.__consume_id()
 		self.__trefoils[id] = {'where': nodes}
 		for n in nodes:
 			self.__nodes[n]['status'] = STATUS_TREFOIL_PARTICIPANT
 			self.__nodes[n]['owner'] = id
-		return id
+
+		self.emit('post_new_trefoil', self, nodes)
+		self.emit('post_status_change', self, nodes)
 
 	def pop_vacancy(self, node):
-		self.emit('del_vacancy', self, node)
+		self.emit('pre_del_vacancy', self, node)
+		self.emit('pre_status_change', self, [node])
 
 		id = self.__find_vacancy(node)
 		vacancy = self.__vacancies.pop(id)
 		self.__nodes[node]['status'] = STATUS_NO_VACANCY
 		self.__nodes[node]['owner'] = None
 
+		self.emit('post_del_vacancy', self, node)
+		self.emit('post_status_change', self, [node])
 		return vacancy
 
 	def pop_trefoil(self, nodes):
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
 
-		self.emit('del_trefoil', self, nodes)
+		self.emit('pre_del_trefoil', self, nodes)
+		self.emit('pre_status_change', self, nodes)
 
 		id = self.__find_trefoil(nodes)
 		trefoil = self.__trefoils.pop(id)
@@ -185,6 +195,8 @@ class State:
 			self.__nodes[node]['status'] = STATUS_NO_VACANCY
 			self.__nodes[node]['owner'] = None
 
+		self.emit('post_del_trefoil', self, nodes)
+		self.emit('post_status_change', self, nodes)
 		return trefoil
 
 	def __find_vacancy(self, node):
@@ -228,19 +240,15 @@ class State:
 # FIXME Name is dumb
 class RuleSet:
 	def __init__(self, initial_state, event_manager):
+		# FIXME these should be specified via config
 		self.rules = [
 			RuleCreateVacancy(initial_state, event_manager),
 			RuleFillVacancy(initial_state, event_manager),
+			RuleMoveVacancy(initial_state, event_manager),
 		]
 		# FIXME should clone() to avoid mutating input,
 		#  but State.clone is currently b0rked.
 		self.state = initial_state#.clone()
-
-		# kinds and weights
-		kw_pairs = list(flat(x.kinds().items() for x in self.rules))
-		assert len(kw_pairs) == len(set(k for (k,w) in kw_pairs)), 'kinds not unique!'
-
-		self.weight = dict(kw_pairs)
 
 	def rate(self, rule, kind):
 		# FIXME should be based on energy barrier and boltzmann
@@ -320,10 +328,7 @@ class Rule:
 		self.initialize_moves(initial_state)
 
 		# implementations of these required on each subclass
-		event_man.add_listener('new_vacancy', self.on_new_vacancy)
-		event_man.add_listener('del_vacancy', self.on_del_vacancy)
-		event_man.add_listener('new_trefoil', self.on_new_trefoil)
-		event_man.add_listener('del_trefoil', self.on_del_trefoil)
+		event_man.add_listeners_from(self)
 
 	# API for the KMC engine
 
@@ -370,14 +375,21 @@ class RuleCreateVacancy(Rule):
 
 	def info(self, node): return { 'node': node }
 	def kinds(self): return { None: 2.0 }
+
 	def initialize_moves(self, state):
 		for (node,status) in state.nodes_with_status():
 			if status is STATUS_NO_VACANCY:
 				self.add_move(node)
-	def on_new_vacancy(self, state, node): self.clear_move(node)
-	def on_del_vacancy(self, state, node): self.add_move(node)
-	def on_new_trefoil(self, state, nodes): [self.clear_move(x) for x in nodes]
-	def on_del_trefoil(self, state, nodes): [self.add_move(x) for x in nodes]
+
+	# Invalidate nodes that change.
+	def pre_status_change(self, state, nodes):
+		for node in nodes:
+			if state.node_status(node) is STATUS_NO_VACANCY:
+				self.clear_move(node)
+	def post_status_change(self, state, nodes):
+		for node in nodes:
+			if state.node_status(node) is STATUS_NO_VACANCY:
+				self.add_move(node)
 
 class RuleFillVacancy(Rule):
 	def perform(self, node, state):
@@ -385,58 +397,77 @@ class RuleFillVacancy(Rule):
 
 	def info(self, node): return { 'node': node }
 	def kinds(self): return { None: 1.0 }
+
 	def initialize_moves(self, state):
 		for (node,status) in state.nodes_with_status():
 			if status is STATUS_DIVACANCY:
 				self.add_move(node)
-	def on_new_vacancy(self, state, node): self.add_move(node)
-	def on_del_vacancy(self, state, node): self.clear_move(node)
-	def on_new_trefoil(self, state, nodes): pass
-	def on_del_trefoil(self, state, nodes): pass
+
+	# Invalidate nodes that change.
+	def pre_status_change(self, state, nodes):
+		for node in nodes:
+			if state.node_status(node) is STATUS_DIVACANCY:
+				self.clear_move(node)
+	def post_status_change(self, state, nodes):
+		for node in nodes:
+			if state.node_status(node) is STATUS_DIVACANCY:
+				self.add_move(node)
 
 class RuleMoveVacancy(Rule):
-	def perform(self, move, kind, state):
+	def perform(self, move, state):
 		(old,new) = move
 		state.pop_vacancy(old)
 		state.new_vacancy(new)
 
-#	def info(self, move, kind):
-#       (old,new) = move
-#		return {
-#			'action': 'move_vacancy',
-#			'was': old,
-#		}
-	def kinds(self):
-		return [(self, 1.0)]
-#	def on_new_vacancy(self, state, node): self.clear_move(node)
-#	def on_del_vacancy(self, state, node): self.add_move(node)
-#	def on_new_trefoil(self, state, nodes): [self.clear_move(x) for x in nodes]
-#	def on_del_trefoil(self, state, nodes): [self.add_move(x) for x in nodes]
+	def info(self, move):
+		(old,new) = move
+		return { 'was': old, 'now': new }
+	def kinds(self): return { None: 1.0 }
 
+	def initialize_moves(self, state):
+		for n in state.grid.nodes():
+			[self.add_move((n,nbr)) for nbr in self.eligible_moves(state, n)]
 
-# Provides a weak abstraction layer between State and Rules so that
-# Rules can be incrementally updated in response to state changes
-#
-# Rules "listen" to events generated by the State.
+	# Invalidate moves originating at a max distance of 1 from nodes that change.
+	def pre_status_change(self, state, nodes):
+		for n in state.grid.nodes_in_distance_range(nodes, 0, 1):
+			[self.clear_move((n,nbr)) for nbr in self.eligible_moves(state, n)]
+	def post_status_change(self, state, nodes):
+		for n in state.grid.nodes_in_distance_range(nodes, 0, 1):
+			[self.add_move((n,nbr)) for nbr in self.eligible_moves(state, n)]
+
+	# --- helpers ---
+	def eligible_moves(self, state, node):
+		if state.node_status(node) is STATUS_DIVACANCY:
+			for nbr in state.grid.neighbors(node):
+				if state.node_status(nbr) is STATUS_NO_VACANCY:
+					yield nbr
+
+VALID_EVENTS = set([
+	'pre_new_vacancy', 'post_new_vacancy',
+	'pre_del_vacancy', 'post_del_vacancy',
+	'pre_new_trefoil', 'post_new_trefoil',
+	'pre_del_trefoil', 'post_del_trefoil',
+	'pre_status_change', 'post_status_change',
+])
+# alternatively we could use decorators to tag methods that are handlers
+# but then I would worry about bugs due to forgetting to tag one
+def looks_like_handler(attrname):
+	return attrname.startswith('pre_') or attrname.startswith('post_')
 class EventManager:
 	def __init__(self):
-		self.__handlers = defaultdict(set)
+		self.__handlers = {name:set() for name in VALID_EVENTS}
 
 	def emit(self, symbol, *args):
-		import warnings
-		if not self.__handlers[symbol]:
-			warnings.warn('No event handlers for %s' % symbol)
-		logging.debug('EVENT: %s -- %r', colored(symbol, 'yellow'), args)
 		for func in self.__handlers[symbol]:
 			func(*args)
 
-	def add_listener(self, symbol, func):
-		self.__handlers[symbol].add(func)
-
-	def clear_all_listeners(self):
-		self.__handlers = defaultdict(set)
-
-
+	def add_listeners_from(self, obj):
+		for attr in dir(obj):
+			# eagerly assume that a handler-resembling function is one;
+			#  a KeyError beats unintentionally dead code!
+			if looks_like_handler(attr):
+				self.__handlers[attr].add(getattr(obj,attr))
 
 def flat(it):
 	for x in it:
@@ -461,7 +492,25 @@ class Grid:
 
 		For one to actually form, three nodes must all mutually be
 		trefoil neighbors. '''
-		return self.rotations_around(node, [2,-2,0])
+		return self.rotations_around(node, [2, -2, 0])
+
+	def nodes_in_distance_range(self, nodes, mindist, maxdist):
+		'''
+		Collect nodes in a range of distances from a set of nodes.
+
+		Collects nodes at a distance from ``mindist`` to ``maxdist``, inclusive.
+		The input nodes have distance 0, their neighbors (excluding themselves)
+		are distance 1, et cetera.
+
+		Designed for functions which need to invalidate a region of the grid
+		after making several modifications.
+		'''
+		# structured to avoid unnecessarily computing an extra group
+		if maxdist < mindist: return
+		for (n,group) in enumerate(bfs_groups_by_distance(nodes, self.neighbors)):
+			if n < mindist: continue
+			yield from group
+			if n >= maxdist: break
 
 	def rotations_around(self, node, disp):
 		''' Get the node at node+disp, together with the other 5 nodes
@@ -482,4 +531,19 @@ class Grid:
 		''' Apply PBC to get a node's image in the unit cell. '''
 		a, b = node
 		return (a % self.dim[0], b % self.dim[1])
+
+
+def bfs_groups_by_distance(roots, edge_func):
+	seen = set()
+	current = set(roots)
+	while True:
+		yield current
+		seen |= current
+		prev = current
+
+		current = set()
+		for x in prev:
+			new = set(edge_func(x))
+			new -= seen
+			current.update(new)
 

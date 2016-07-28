@@ -1,7 +1,7 @@
 import random
 import numpy as np
 from collections import defaultdict, Counter
-from .util import debug
+from .validate import validate_set, validate_dict, validate_no_dupes
 
 class IncrementalMoveCache():
 	'''
@@ -121,6 +121,15 @@ class IncrementalMoveCache():
 		'''
 		return {ks:set(vs) for (ks,vs) in self.__kindset.value_iters().items()}
 
+	def validate_against(self, other):
+		'''
+		Perform a comprehensive check against another IncrementalMoveCache.
+
+		Raises an exception or returns True. (for use in assert).
+		'''
+		self.__kindset.validate_against(other.__kindset)
+		return True
+
 
 class ReverseDict:
 	'''
@@ -207,37 +216,53 @@ class ReverseDict:
 			return default
 		assert False, "unreachable"
 
-	# a much more rigorous equality test than __eq__ which
-	# also looks at all of the redundant data structures
-	#
-	# Expects to only be run in debug mode.  Code outside of tests
-	# can ensure this is held by doing 'assert obj.debug_validate(other)'
-	# (the method always returns True for precisely this purpose)
-	def debug_validate(self, correct):
-		# FIXME this method contains both self-integrity tests and comparisons
-		#  against another object, which feels like conflating goals.
-		# However, it is like this because I want these self-integrity tests
-		# to run during unittests
+	def validate_integrity(self):
+		'''
+		Perform an expensive test of self-integrity.
 
-		# compare to a gold standard
-		assert self.__value == correct.__value
-		def comparable_keys(obj):
-			# canonicalize the form of obj.__keys.
-			# keep in mind we only require keys and values
-			#  to be hashable/equatable, not orderable.
-			return {v:set(ks) for (v,ks) in self.__keys.items()}
-		assert comparable_keys(self) == comparable_keys(correct)
+		Raises an exception or returns True. (for use in assert).
+		'''
+		# Check for duplicate keys in __keys
+		validate_no_dupes(
+			flat(self.__keys.values()),
+			name='__keys', item='key')
 
-		# address the above note by further ensuring __keys has no dupes
-		all_keys = list(flat(self.__keys.values()))
-		assert len(all_keys) == len(set(all_keys))
+		# Check for extra/missing indices in __index
+		validate_set(
+			set(self.__value.items()),
+			set(self.__index.keys()),
+			name1='__keys', name2='__index', item='keyval pair')
 
-		# check integrity of index lookup
 		for (value,keys) in self.__keys.items():
-			assert keys, 'empty key list not deleted'
 			for (idx,key) in enumerate(keys):
-				assert self.__index[(key,value)] == idx
+				if self.__index[(key,value)] != idx:
+					raise AssertionError('error in __index for (key, value) = {!r}'.format((key,value)))
 
+		for (value, lst) in self.__keys.items():
+			if not lst:
+				raise AssertionError('empty key list not deleted for value: {!r}'.format(value))
+
+		return True
+
+	def validate_equal(self, other):
+		'''
+		Perform a comprehensive check against another IncrementalMoveCache.
+
+		Raises an exception or returns True. (for use in assert).
+		'''
+		# We need only compare the key-value pairs; everything else
+		#  in this structure is an implementation detail.
+		validate_dict(
+			self.__value, other.__value,
+			name1='actual', name2='expected')
+		return True
+
+	def validate_against(self, other):
+		'''
+		Combines ``validate_integrity`` and ``validate_equal``.
+		'''
+		self.validate_integrity()
+		self.validate_equal(other)
 		return True
 
 	def pop_arbitrary_key(self, value):
@@ -327,7 +352,16 @@ class ReverseDictTests(unittest.TestCase):
 		c = ReverseDict(a)                 # (ReverseDict)
 		d = ReverseDict(self.three_dict.items()) # iterable of (key,value)
 		for s,t in permutations([a,b,c,d], r=2):
-			assert s.debug_validate(t)
+			s.validate_against(t)
+
+	def require_match_success(self, obj1, obj2):
+		obj1.validate_against(obj2)
+	def require_match_failure(self, obj1, obj2):
+		# don't use validate_against in assertRaises because failures
+		# in validate_integrity are NEVER expected
+		obj1.validate_integrity()
+		obj2.validate_integrity()
+		self.assertRaises(AssertionError, obj1.validate_equal, obj2)
 
 	def test_delegated(self):
 		# __len__
@@ -371,30 +405,30 @@ class ReverseDictTests(unittest.TestCase):
 
 	def test_setitem(self):
 		assert len(self.three) == 3
-		self.assertRaises(AssertionError, self.three.debug_validate, self.four)
+		self.require_match_failure(self.three, self.four)
 
 		# __setitem__ - key not present
 		self.three['d'] = 'third'
 		assert len(self.three) == 4
-		assert self.three.debug_validate(self.four)
+		self.require_match_success(self.three, self.four)
 
 		# __setitem__ - key already present
-		self.assertRaises(AssertionError, self.three.debug_validate, self.fourB)
+		self.require_match_failure(self.three, self.fourB)
 		self.three['b'] = 'third'
 		assert len(self.three) == 4
-		assert self.three.debug_validate(self.fourB)
+		self.require_match_success(self.three, self.fourB)
 
 	def test_delitem(self):
 		# delete only key with value
-		self.assertRaises(AssertionError, self.four.debug_validate, self.three)
+		self.require_match_failure(self.four, self.three)
 		del self.four['d']
-		assert self.four.debug_validate(self.three)
+		self.require_match_success(self.four, self.three)
 		self.assertSetEqual(set(self.four.value_counts()), set(['shared','unique']))
 
 		# delete one key when multiple exist for value
 		del self.four['a']
 		self.assertSetEqual(set(self.four.value_counts()), set(['shared','unique']))
-		assert self.four.debug_validate(ReverseDict({ 'b': 'shared', 'c': 'unique' }))
+		self.require_match_success(self.four, ReverseDict({ 'b': 'shared', 'c': 'unique' }))
 
 		# delete non-existing
 		self.assertRaises(KeyError, self.four.__delitem__, 'w')
@@ -416,11 +450,11 @@ class ReverseDictTests(unittest.TestCase):
 		# Doesn't matter which is which; we just want both cases to work correctly.
 		d_a = make_new_dict()
 		del d_a['a']
-		assert d_a.debug_validate(make_new_dict(a=False))
+		self.require_match_success(d_a, make_new_dict(a=False))
 
 		d_b = make_new_dict()
 		del d_b['b']
-		assert d_b.debug_validate(make_new_dict(b=False))
+		self.require_match_success(d_b, make_new_dict(b=False))
 
 	def test_lookup_keys(self):
 		keys = sorted(self.three.lookup_keys('shared'))
@@ -439,7 +473,7 @@ class ReverseDictTests(unittest.TestCase):
 		self.assertEqual(self.three.pop('b'), 'shared')
 		self.assertEqual(self.three.pop('c'), 'unique')
 		self.assertEqual(self.three.pop('a'), 'shared')
-		assert self.three.debug_validate(self.empty)
+		self.require_match_success(self.three, self.empty)
 
 
 	def do_pop_xxx_keys(self, meth):
@@ -452,7 +486,7 @@ class ReverseDictTests(unittest.TestCase):
 		]
 		self.assertSetEqual(set(popped[:2]), set('ab'))
 		self.assertEqual(set(popped[2]), set('c'))
-		assert self.three.debug_validate(self.empty)
+		self.require_match_success(self.three, self.empty)
 
 	def test_pop_random_key(self):
 		self.do_pop_xxx_keys(ReverseDict.pop_random_key)

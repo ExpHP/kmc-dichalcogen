@@ -4,6 +4,8 @@ from __future__ import division
 import itertools
 import hexagonal as hex
 
+from .validate import validate_dict
+
 try: import cPickle as pickle
 except ImportError: import pickle
 
@@ -54,6 +56,17 @@ class State:
 	# FIXME: I think I may want to switch these dicts out for named tuples,
 	#  to help dodge bugs caused by mispelling keys in __setitem__
 
+	def validate(self):
+		'''
+		Validate incrementalized computations with an expensive test.
+
+		Throws an exception or returns True (for use in assert).
+		'''
+		self.__validate_nodes_lookup()
+		return True
+
+	# This function is the "gold standard" for what __nodes should look like.
+	# Methods like 'new_vacancy' must strive to preserve this definition.
 	def __compute_nodes_lookup(self):
 		''' generates __nodes from __vacancies and __trefoils '''
 		cache = {
@@ -73,28 +86,13 @@ class State:
 
 		return cache
 
-	def __debug_validate_nodes_lookup(self):
-		def run_in_debug_only():
-			expected = self.__compute_nodes_lookup()
-			actual   = self.__nodes
+	def __validate_nodes_lookup(self):
+		validate_dict(
+			self.__nodes,
+			self.__compute_nodes_lookup(),
+			name1='cached', name2='expected', key='node')
 
-			missing_nodes = set(expected) - set(actual)
-			if missing_nodes:
-				raise AssertionError("node not in lookup: {!r}".format(missing_nodes.pop()))
-
-			unexpected_nodes = set(actual) - set(expected)
-			if unexpected_nodes:
-				raise AssertionError("unexpected node in lookup: {!r}".format(unexpected_nodes.pop()))
-
-			for n in expected:
-				if expected[n] != actual[n]:
-					raise AssertionError("bad data for node {!r}\n"
-						"  In Table: {!r}\n"
-						"  Expected: {!r}".format(n, actual[n], expected[n]))
-
-			return True
-
-		assert run_in_debug_only()
+		return True
 
 	#------------------------------------------
 	# Accessors/iterators

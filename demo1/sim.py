@@ -37,7 +37,7 @@ class KmcSim:
 		'''
 		if state is not None:
 			self.state = state.clone()
-		assert hasattr(self, 'state') # one was required at construction
+		assert self.state is not None # one was required at construction
 
 		# Regenerate rules
 		self.rules_and_rates = {}
@@ -125,7 +125,15 @@ class KmcSim:
 		}
 
 	def validate(self):
-		raise RuntimeError('method stub') # FIXME
+		'''
+		Perform an expensive self-integrity check.
+
+		Raises an exception or returns True (for use in assert).
+		'''
+		self.state.validate()
+		for rule in self.rules_and_rates:
+			rule.validate(self.state)
+		return True
 
 class RuleSpec:
 	''' Generates a Rule and describes its rates. '''
@@ -173,11 +181,36 @@ class Rule:
 				(type(self).__name__, bad_kw_args.pop()))
 		self.subinit(**init_kw)
 
+	def __compute_move_cache(self, state):
+		# FIXME monkey patching an initialization function, really?
+		#       especially one that is an abstract member!?
+		tmp = self.move_cache
+		self.move_cache = IncrementalMoveCache()
+
+		self.initialize_moves(state)
+
+		out = self.move_cache
+		self.move_cache = tmp
+		return out
+
+	def __validate_move_cache(self, state):
+		expected = self.__compute_move_cache(state)
+		self.move_cache.validate_against(expected)
+
+	def validate(self, state):
+		'''
+		Perform an expensive self-integrity check, given the state.
+
+		Throws an exception or returns True (for use in assert).
+		'''
+		self.__validate_move_cache(state)
+		return True
+
+	# API for the KMC engine
+
 	def subinit(self):
 		''' Init for rule-specific properties. (i.e. store config flags) '''
 		pass
-
-	# API for the KMC engine
 
 	def perform(self, move, state):
 		''' Perform the given move on the state, mutating it. '''

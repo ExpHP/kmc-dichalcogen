@@ -90,10 +90,10 @@ def run(ofile, nsteps, dims, config_dict, validate_every, incremental):
 	init_state = State(dims)
 	sim = KmcSim(init_state, cfg['rule_specs'], incremental=incremental)
 
-	def maybe_do_validation(step):
+	def maybe_do_validation(steps_done):
 		if not validate_every: return
-		if not step > 0: return
-		if not step % validate_every == 0: return
+		if not steps_done > 0: return
+		if not steps_done % validate_every == 0: return
 		sim.validate()
 
 	# to write json incrementally we'll need to do a bit ourselves
@@ -116,7 +116,7 @@ def run(ofile, nsteps, dims, config_dict, validate_every, incremental):
 
 				# somewhat silly HACK to recover step number
 				if n%2 == 0: # only perform after writing step (not comma)
-					maybe_do_validation(step=n//2)
+					maybe_do_validation(steps_done = n//2 + 1)
 
 	ofile.write('\n')
 

@@ -14,11 +14,12 @@ eV_PER_J = 6.24150913e18
 BOLTZMANN__J_PER_K  = 1.38064852e-23
 BOLTZMANN__eV_PER_K = BOLTZMANN__J_PER_K * eV_PER_J
 
-class IncrementalSim:
+class KmcSim:
 	def __init__(self, initial_state, rule_specs, event_manager, incremental=True):
 		self.rule_specs = list(rule_specs)
 		self.event_manager = event_manager
 		self.initialize(initial_state)
+		self.incremental = incremental
 
 	def initialize(self, state=None):
 		if state is not None:
@@ -79,6 +80,9 @@ class IncrementalSim:
 		'''
 		from math import fsum
 
+		if not self.incremental:
+			self.initialize()
+
 		(counts, sources) = self.__rule_kind_counts()
 
 		# Choose which rule and kind of move should occur
@@ -101,12 +105,8 @@ class IncrementalSim:
 			'total_rate': fsum(r for (_,r) in k_w_pairs),
 		}
 
-class GoldStandardSim(IncrementalSim):
-	''' a debugging object that provides non-incremental ruleset updates
-	which is perhaps slightly less temperamental than it used to be '''
-	def perform_random_move(self):
-		super().initialize()
-		return super().perform_random_move()
+	def validate(self):
+		raise RuntimeError('method stub') # FIXME
 
 class RuleSpec:
 	''' Generates a Rule and describes its rates. '''

@@ -8,6 +8,7 @@ from functools import partial
 
 from .state import State
 from .sim import EventManager
+from .sim import KmcSim
 from . import config
 
 PROG = 'demo1'
@@ -18,33 +19,43 @@ def main():
 	parser = argparse.ArgumentParser('python -m ' + PROG, description='')
 
 
-	parser.add_argument('CONFIG', type=argparse.FileType('r'),
+	parser.add_argument('CONFIG',
+		type=argparse.FileType('r'),
 		help='path to config file')
+
 	parser.add_argument('-d', '--dimensions', metavar='ARM,ZAG',
-		default=[50,50],
-		type=delim_parser(positive_int, n=2, sep=','),
+		type=delim_parser(positive_int, n=2, sep=','), default=[50,50],
 		help='PBC grid dimensions as a number of unit cells in each dimension')
-	parser.add_argument('-n', '--steps', type=positive_int, default=20,
+
+	parser.add_argument('-n', '--steps',
+		type=positive_int, default=20,
 		help='stop after this many events')
+
 	parser.add_argument('-P', '--output-pstats',
 		help='record profiling data, readable by the pstats module')
-	parser.add_argument('-p', '--profile', action='store_true',
+
+	parser.add_argument('-p', '--profile',
+		action='store_true',
 		help='display profiling data')
-	parser.add_argument('-D', '--debug', action='store_true',
+
+	parser.add_argument('-D', '--debug',
+		action='store_true',
 		help='display debug logs, hide standard output')
-	parser.add_argument('-g', '--gold-standard', action='store_true',
-		help='use gold standard ruleset (debugging flag)')
+
+	group = parser.add_mutually_exclusive_group()
+	group.add_argument('--no-incremental',
+		action='store_true',
+		help='disable incremental updates (debugging flag)')
+
+	group.add_argument('--validate-every', metavar='NSTEP',
+		type=nonnegative_int, default=0,
+		help='do incremental updates, but perform an expensive validation '
+		'of all objects every NSTEP steps. (debugging flag)')
+
 	args = parser.parse_args()
 
 	if args.debug:
 		logging.getLogger().setLevel(10)
-
-	# FIXME now that I think about it why is GoldStandard implemented through a class hack?
-	global KmcSim
-	if args.gold_standard:
-		from .sim import GoldStandardSim as KmcSim
-	else:
-		from .sim import IncrementalSim as KmcSim
 
 	import yaml
 	config_dict = yaml.load(args.CONFIG)
@@ -56,6 +67,8 @@ def main():
 			nsteps = args.steps,
 			dims = args.dimensions,
 			config_dict = config_dict,
+			validate_every = args.validate_every,
+			incremental = not args.no_incremental,
 		)
 
 	if args.output_pstats or args.profile:
@@ -70,32 +83,42 @@ class DevNull:
 
 #-----------------------------
 
-def run(ofile, nsteps, dims, config_dict):
+def run(ofile, nsteps, dims, config_dict, validate_every, incremental):
 	import json
 
 	cfg = config.from_dict(config_dict)
 
 	event_manager = EventManager()
 	init_state = State(dims, emit=event_manager.emit)
-	sim = KmcSim(init_state, cfg['rule_specs'], event_manager)
+	sim = KmcSim(init_state, cfg['rule_specs'], event_manager, incremental=incremental)
+
+	def maybe_do_validation(step):
+		if not validate_every: return
+		if not step > 0: return
+		if not step % validate_every == 0: return
+		sim.validate()
 
 	# to write json incrementally we'll need to do a bit ourselves
 	with write_enclosing('{', '\n}', ofile):
-		ofile.write('"grid": ')
-		json.dump(grid_info(dims), ofile, indent=2)
-		ofile.write(',\n')
+		def write_key_val(key, val, end=',\n'):
+			ofile.write('"%s": ' % key)
+			json.dump(val, ofile, indent=2)
+			ofile.write(end)
 
-		ofile.write('"config": ')
-		json.dump(config_dict, ofile, indent=2)
-		ofile.write(',\n')
+		write_key_val('grid', grid_info(dims))
+		write_key_val('config', config_dict)
 
 		with write_enclosing(' "events": [\n  ', '\n ]', ofile):
 			# everything here is done with iterators for the sake of
 			# incremental output
 			infos = (sim.perform_random_move() for _ in range(nsteps))
 			strs = (json.dumps(x, sort_keys=True) for x in infos)
-			for s in with_separator(',\n  ', strs):
+			for n,s in enumerate(with_separator(',\n  ', strs)):
 				ofile.write(s)
+
+				# somewhat silly HACK to recover step number
+				if n%2 == 0: # only perform after writing step (not comma)
+					maybe_do_validation(step=n//2)
 
 	ofile.write('\n')
 

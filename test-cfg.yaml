@@ -1,12 +1,17 @@
 rules:
   RuleCreateVacancy:
-      rate: 30.20
+    rate: 10.5
   RuleFillVacancy:
-      rate:
-        natural: 3.0
+    rate:
+      natural: 3.0
   RuleMoveVacancy:
-      rate:
-        natural: 12.0
-        near-two: 3.0
-        near-one: 7.0
-        near-both: 7.0
+    rate:
+      natural: 12.0
+      near-two: 3.0
+      near-one: 7.0
+      near-both: 7.0
+  RuleCreateTrefoil:
+    rate: 5000
+  RuleDestroyTrefoil:
+    rate: 400
+

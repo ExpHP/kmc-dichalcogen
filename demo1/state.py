@@ -97,6 +97,13 @@ class State:
 	#------------------------------------------
 	# Accessors/iterators
 
+	# FIXME: I thought I deleted all the public member funcs involving
+	#  vacancy/trefoil ids.  Did I stash and forget?
+	# FIXME: Now that vacancies no longer keep their identity when moving
+	#  around, I'm really beginning to feel that the ids are just cruft in
+	#  general. They are currently here because the trefoil/vacancy objects
+	#  are dicts, which are not hashable.
+
 	def vacancies(self): return self.__vacancies.__iter__()
 	def vacancy_node(self, id): return self.__vacancies[id]['where']
 	def vacancy_layer(self, id): return self.__vacancies[id]['layer']
@@ -110,6 +117,11 @@ class State:
 	def trefoils(self): return self.__trefoils.__iter__()
 	def trefoil_nodes(self, id): return self.__trefoils[id]['where']
 	def trefoils_with_id(self): return self.__trefoils.items()
+	def trefoil_nodes_at(self, node):
+		id = self.__nodes[node]['owner']
+		if id not in self.__trefoils:
+			raise KeyError('node not a trefoil')
+		return frozenset(self.__trefoils[id]['where'])
 
 	#------------------------------------------
 	# Public mutators
@@ -200,9 +212,10 @@ class State:
 
 	def __find_trefoil(self, nodes):
 		nodes = frozenset(nodes)
-		id = self.__nodes[nodes[0]]['owner']
+		id = self.__nodes[next(iter(nodes))]['owner']
 		assert self.__trefoils[id]['where'] == nodes
 		return id
+
 
 	#------------------------------------------
 	# Low-level mutators

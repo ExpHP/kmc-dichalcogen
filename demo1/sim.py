@@ -315,6 +315,77 @@ class RuleMoveVacancy(Rule):
 				if state.node_status(nbr) is STATUS_NO_VACANCY:
 					yield nbr
 
+class RuleCreateTrefoil(Rule):
+	''' Allows 3 divacancies to rotate into a trefoil defect. '''
+	def perform(self, nodes, state):
+		for node in nodes:
+			state.pop_vacancy(node)
+		state.new_trefoil(nodes)
+
+	def info(self, nodes): return { 'nodes': list(nodes) }
+
+	# FIXME Anybody else seeing a *very particular pattern*
+	#       emerging in the impls of these three methods?
+	def initialize_moves(self, state):
+		for move in self.__moves_involving(state, state.grid.nodes()):
+			self.add_move(move)
+	def pre_status_change(self, state, nodes):
+		for move in self.__moves_involving(state, nodes):
+			self.clear_move(move)
+	def post_status_change(self, state, nodes):
+		for move in self.__moves_involving(state, nodes):
+			self.add_move(move)
+
+	def __can_become_trefoil(self, state, node):
+		return state.node_status(node) == STATUS_DIVACANCY
+	def __moves_involving(self, state, nodes):
+		from functools import partial
+		from itertools import combinations
+		can_become_trefoil = partial(self.__can_become_trefoil, state)
+
+		def inner(nodes):
+			# find trefoil-ready groups in which at least one vertex was invalidated
+			nodes = list(filter(can_become_trefoil, nodes))
+			for node1 in nodes:
+				neighbors = state.grid.trefoil_neighbors(node1)
+				neighbors = list(filter(can_become_trefoil, neighbors))
+				for node2, node3 in combinations(neighbors, r=2):
+					if node2 in state.grid.trefoil_neighbors(node3):
+						yield frozenset([node1,node2,node3])
+
+		# There may be duplicates; cull them.
+		return set(inner(nodes)).__iter__()
+
+class RuleDestroyTrefoil(Rule):
+	''' Allows a trefoil to rotate back into 3 garden-variety divacancies. '''
+	def perform(self, nodes, state):
+		state.pop_trefoil(nodes)
+		for node in nodes:
+			state.new_vacancy(node)
+
+	def info(self, nodes): return { 'nodes': list(nodes) }
+
+	# FIXME Anybody else seeing a *very particular pattern*
+	#       emerging in the impls of these three methods?
+	def initialize_moves(self, state):
+		for move in self.__moves_involving(state, state.grid.nodes()):
+			self.add_move(move)
+	def pre_status_change(self, state, nodes):
+		for move in self.__moves_involving(state, nodes):
+			self.clear_move(move)
+	def post_status_change(self, state, nodes):
+		for move in self.__moves_involving(state, nodes):
+			self.add_move(move)
+
+	def __moves_involving(self, state, nodes):
+		# find trefoils for which at least one vertex was invalidated
+		remaining = {x for x in nodes if state.node_status(x) is STATUS_TREFOIL_PARTICIPANT}
+		while remaining:
+			trefoil_nodes = frozenset(state.trefoil_nodes_at(remaining.pop()))
+			remaining -= trefoil_nodes # skip dupes
+			yield trefoil_nodes
+
+
 VALID_EVENTS = set([
 	# FIXME should remove these other events if I still find no use for them
 	#       after a sufficient period of time; status_change is really handy

@@ -243,49 +243,43 @@ class Rule:
 		assert self.move_cache.has_move(move)
 		self.move_cache.clear_all(move)
 
-class RuleCreateVacancy(Rule):
+# A (likely temporary) intermediate class which abstracts out a very
+# common pattern seen among the implementation of the rules.
+class InvalidationBasedRule(Rule):
+	def moves_dependent_on(self, state, nodes):
+		''' Get a list of moves present in the current board whose existence
+		depends on the status of at least one of the given nodes. '''
+		raise NotImplementedError
+
+	def initialize_moves(self, state):
+		for move in self.moves_dependent_on(state, state.grid.nodes()):
+			self.add_move(move)
+	def pre_status_change(self, state, nodes):
+		for move in self.moves_dependent_on(state, nodes):
+			self.clear_move(move)
+	def post_status_change(self, state, nodes):
+		for move in self.moves_dependent_on(state, nodes):
+			self.add_move(move)
+
+class RuleCreateVacancy(InvalidationBasedRule):
 	def perform(self, node, state):
 		state.new_vacancy(node)
 
 	def info(self, node): return { 'node': node }
 
-	def initialize_moves(self, state):
-		for (node,status) in state.nodes_with_status():
-			if status is STATUS_NO_VACANCY:
-				self.add_move(node)
+	def moves_dependent_on(self, state, nodes):
+		return [x for x in nodes if state.node_status(x) is STATUS_NO_VACANCY]
 
-	# Invalidate nodes that change.
-	def pre_status_change(self, state, nodes):
-		for node in nodes:
-			if state.node_status(node) is STATUS_NO_VACANCY:
-				self.clear_move(node)
-	def post_status_change(self, state, nodes):
-		for node in nodes:
-			if state.node_status(node) is STATUS_NO_VACANCY:
-				self.add_move(node)
-
-class RuleFillVacancy(Rule):
+class RuleFillVacancy(InvalidationBasedRule):
 	def perform(self, node, state):
 		state.pop_vacancy(node)
 
 	def info(self, node): return { 'node': node }
 
-	def initialize_moves(self, state):
-		for (node,status) in state.nodes_with_status():
-			if status is STATUS_DIVACANCY:
-				self.add_move(node)
+	def moves_dependent_on(self, state, nodes):
+		return [x for x in nodes if state.node_status(x) is STATUS_DIVACANCY]
 
-	# Invalidate nodes that change.
-	def pre_status_change(self, state, nodes):
-		for node in nodes:
-			if state.node_status(node) is STATUS_DIVACANCY:
-				self.clear_move(node)
-	def post_status_change(self, state, nodes):
-		for node in nodes:
-			if state.node_status(node) is STATUS_DIVACANCY:
-				self.add_move(node)
-
-class RuleMoveVacancy(Rule):
+class RuleMoveVacancy(InvalidationBasedRule):
 	def perform(self, move, state):
 		(old,new) = move
 		state.pop_vacancy(old)
@@ -296,26 +290,23 @@ class RuleMoveVacancy(Rule):
 		return { 'was': old, 'now': new }
 	def kinds(self): return [DEFAULT_KIND]
 
+	def moves_dependent_on(self, state, nodes):
+		for n in state.grid.nodes_in_distance_range(nodes, 0, 1):
+			yield from self.moves_from_node(state, n)
+
+	# override to avoid an unnecessary bfs
 	def initialize_moves(self, state):
-		for n in state.grid.nodes():
-			[self.add_move((n,nbr)) for nbr in self.eligible_moves(state, n)]
+		for node in state.grid.nodes():
+			for move in self.moves_from_node(state, node):
+				self.add_move(move)
 
-	# Invalidate moves originating at a max distance of 1 from nodes that change.
-	def pre_status_change(self, state, nodes):
-		for n in state.grid.nodes_in_distance_range(nodes, 0, 1):
-			[self.clear_move((n,nbr)) for nbr in self.eligible_moves(state, n)]
-	def post_status_change(self, state, nodes):
-		for n in state.grid.nodes_in_distance_range(nodes, 0, 1):
-			[self.add_move((n,nbr)) for nbr in self.eligible_moves(state, n)]
-
-	# --- helpers ---
-	def eligible_moves(self, state, node):
+	def moves_from_node(self, state, node):
 		if state.node_status(node) is STATUS_DIVACANCY:
 			for nbr in state.grid.neighbors(node):
 				if state.node_status(nbr) is STATUS_NO_VACANCY:
-					yield nbr
+					yield (node, nbr)
 
-class RuleCreateTrefoil(Rule):
+class RuleCreateTrefoil(InvalidationBasedRule):
 	''' Allows 3 divacancies to rotate into a trefoil defect. '''
 	def perform(self, nodes, state):
 		for node in nodes:
@@ -324,26 +315,13 @@ class RuleCreateTrefoil(Rule):
 
 	def info(self, nodes): return { 'nodes': list(nodes) }
 
-	# FIXME Anybody else seeing a *very particular pattern*
-	#       emerging in the impls of these three methods?
-	def initialize_moves(self, state):
-		for move in self.__moves_involving(state, state.grid.nodes()):
-			self.add_move(move)
-	def pre_status_change(self, state, nodes):
-		for move in self.__moves_involving(state, nodes):
-			self.clear_move(move)
-	def post_status_change(self, state, nodes):
-		for move in self.__moves_involving(state, nodes):
-			self.add_move(move)
-
-	def __can_become_trefoil(self, state, node):
-		return state.node_status(node) == STATUS_DIVACANCY
-	def __moves_involving(self, state, nodes):
-		from functools import partial
+	def moves_dependent_on(self, state, nodes):
 		from itertools import combinations
-		can_become_trefoil = partial(self.__can_become_trefoil, state)
 
 		def inner(nodes):
+			def can_become_trefoil(node):
+				return state.node_status(node) == STATUS_DIVACANCY
+
 			# find trefoil-ready groups in which at least one vertex was invalidated
 			nodes = list(filter(can_become_trefoil, nodes))
 			for node1 in nodes:
@@ -356,7 +334,7 @@ class RuleCreateTrefoil(Rule):
 		# There may be duplicates; cull them.
 		return set(inner(nodes)).__iter__()
 
-class RuleDestroyTrefoil(Rule):
+class RuleDestroyTrefoil(InvalidationBasedRule):
 	''' Allows a trefoil to rotate back into 3 garden-variety divacancies. '''
 	def perform(self, nodes, state):
 		state.pop_trefoil(nodes)
@@ -365,19 +343,7 @@ class RuleDestroyTrefoil(Rule):
 
 	def info(self, nodes): return { 'nodes': list(nodes) }
 
-	# FIXME Anybody else seeing a *very particular pattern*
-	#       emerging in the impls of these three methods?
-	def initialize_moves(self, state):
-		for move in self.__moves_involving(state, state.grid.nodes()):
-			self.add_move(move)
-	def pre_status_change(self, state, nodes):
-		for move in self.__moves_involving(state, nodes):
-			self.clear_move(move)
-	def post_status_change(self, state, nodes):
-		for move in self.__moves_involving(state, nodes):
-			self.add_move(move)
-
-	def __moves_involving(self, state, nodes):
+	def moves_dependent_on(self, state, nodes):
 		# find trefoils for which at least one vertex was invalidated
 		remaining = {x for x in nodes if state.node_status(x) is STATUS_TREFOIL_PARTICIPANT}
 		while remaining:

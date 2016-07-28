@@ -15,18 +15,31 @@ BOLTZMANN__J_PER_K  = 1.38064852e-23
 BOLTZMANN__eV_PER_K = BOLTZMANN__J_PER_K * eV_PER_J
 
 class KmcSim:
-	def __init__(self, initial_state, rule_specs, event_manager, incremental=True):
+	'''
+	Runs the KMC simulation.
+
+	Is tasked with managing the initialization, reinitialization,
+	and the setup of incremental update mechanisms for the various
+	components of the computation.
+	'''
+	def __init__(self, initial_state, rule_specs, incremental=True):
+		self.state = None
 		self.rule_specs = list(rule_specs)
-		self.event_manager = event_manager
 		self.initialize(initial_state)
 		self.incremental = incremental
 
 	def initialize(self, state=None):
-		if state is not None:
-			# FIXME should clone() to avoid mutating input,
-			#  but State.clone is currently b0rked.
-			self.state = state
+		'''
+		Perform expensive reinitialization.
 
+		If a ``state`` is provided it will replace the current state.
+		(the input object will not be modified by the sim)
+		'''
+		if state is not None:
+			self.state = state.clone()
+		assert hasattr(self, 'state') # one was required at construction
+
+		# Regenerate rules
 		self.rules_and_rates = {}
 		for spec in self.rule_specs:
 			# FIXME temperature config
@@ -39,9 +52,11 @@ class KmcSim:
 
 			self.rules_and_rates[rule] = rates
 
-		self.event_manager.drop_all_listeners()
+		# Rebind events
+		event_manager = EventManager()
+		self.state.bind_events(event_manager)
 		for r in self.rules_and_rates:
-			self.event_manager.add_listeners_from(r)
+			event_manager.add_listeners_from(r)
 
 	@staticmethod
 	def __validate_kinds(rule, rates):
@@ -72,6 +87,10 @@ class KmcSim:
 
 		return (counts, sources)
 
+	# FIXME: Would like to have a dry_run flag which makes the function "almost pure".
+	#        It should prevent the 'rule.perform' line, and disable reinitialization
+	#         so long as it isn't necessary.  (the second bit can be accomplished
+	#         via a dirty flag)
 	def perform_random_move(self):
 		'''
 		Select and perform a random change to occur to the state.

@@ -7,7 +7,6 @@ import argparse
 from functools import partial
 
 from .state import State
-from .sim import EventManager
 from .sim import KmcSim
 from . import config
 
@@ -88,9 +87,8 @@ def run(ofile, nsteps, dims, config_dict, validate_every, incremental):
 
 	cfg = config.from_dict(config_dict)
 
-	event_manager = EventManager()
-	init_state = State(dims, emit=event_manager.emit)
-	sim = KmcSim(init_state, cfg['rule_specs'], event_manager, incremental=incremental)
+	init_state = State(dims)
+	sim = KmcSim(init_state, cfg['rule_specs'], incremental=incremental)
 
 	def maybe_do_validation(step):
 		if not validate_every: return

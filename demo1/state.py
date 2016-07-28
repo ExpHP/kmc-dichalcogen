@@ -16,16 +16,13 @@ STATUS_TREFOIL_PARTICIPANT = 2
 # (appears as config key, and as a possible value in MoveCache)
 DEFAULT_KIND = 'natural'
 
+def NO_OP(*a, **kw): pass
+
 class State:
 
-	def __init__(self, dim, emit):
+	def __init__(self, dim):
 		self.grid = Grid(dim)
-		# FIXME so this was a bad idea; surprisingly, it looks like bound member
-		#  functions can be pickled; unsurprisingly, it needs to create new copies
-		#  of the bound class objects when unpickling.
-		# As a result, the presence of the emit member indirectly causes clone()
-		#  to create a brand new IncrementalNodeCache.
-		self.emit = emit
+		self.__emit = NO_OP
 		self.__vacancies = {}
 		self.__trefoils = {}
 		self.__nodes = self.__compute_nodes_lookup()
@@ -34,8 +31,24 @@ class State:
 	def dim(self):
 		return self.grid.dim
 
+	def bind_events(self, event_manager):
+		'''
+		Configure the State to send update messages through an EventManager.
+
+		Can be used to enable incremental updates of objects dependent on the state.
+		'''
+		self.__emit = event_manager.emit
+
 	def clone(self):
-		return pickle.loads(pickle.dumps(self))
+		''' Creates a copy of the state (minus event bindings). '''
+		# Must avoid pickling the emit member as it is closed over the
+		#  listeners (and thus they will be recursively cloned)
+		# There's probably a way to structure the code to avoid storing ``emit``
+		# in State in the first place; but I just can't think about it now.
+		(tmp, self.__emit) = (self.__emit, NO_OP)
+		out = pickle.loads(pickle.dumps(self))
+		self.__emit = tmp
+		return out
 
 	#------------------------------------------
 	# FIXME: I think I may want to switch these dicts out for named tuples,
@@ -125,23 +138,23 @@ class State:
 	#   as well; not this class.
 
 	def new_vacancy(self, node):
-		self.emit('pre_new_vacancy', self, node)
-		self.emit('pre_status_change', self, [node])
+		self.__emit('pre_new_vacancy', self, node)
+		self.__emit('pre_status_change', self, [node])
 
 		id = self.__consume_id()
 		self.__vacancies[id] = {'where': tuple(node)}
 		self.__nodes[node]['status'] = STATUS_DIVACANCY
 		self.__nodes[node]['owner'] = id
 
-		self.emit('post_new_vacancy', self, node)
-		self.emit('post_status_change', self, [node])
+		self.__emit('post_new_vacancy', self, node)
+		self.__emit('post_status_change', self, [node])
 
 	def new_trefoil(self, nodes):
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
 
-		self.emit('pre_new_trefoil', self, nodes)
-		self.emit('pre_status_change', self, nodes)
+		self.__emit('pre_new_trefoil', self, nodes)
+		self.__emit('pre_status_change', self, nodes)
 
 		id = self.__consume_id()
 		self.__trefoils[id] = {'where': nodes}
@@ -149,28 +162,28 @@ class State:
 			self.__nodes[n]['status'] = STATUS_TREFOIL_PARTICIPANT
 			self.__nodes[n]['owner'] = id
 
-		self.emit('post_new_trefoil', self, nodes)
-		self.emit('post_status_change', self, nodes)
+		self.__emit('post_new_trefoil', self, nodes)
+		self.__emit('post_status_change', self, nodes)
 
 	def pop_vacancy(self, node):
-		self.emit('pre_del_vacancy', self, node)
-		self.emit('pre_status_change', self, [node])
+		self.__emit('pre_del_vacancy', self, node)
+		self.__emit('pre_status_change', self, [node])
 
 		id = self.__find_vacancy(node)
 		vacancy = self.__vacancies.pop(id)
 		self.__nodes[node]['status'] = STATUS_NO_VACANCY
 		self.__nodes[node]['owner'] = None
 
-		self.emit('post_del_vacancy', self, node)
-		self.emit('post_status_change', self, [node])
+		self.__emit('post_del_vacancy', self, node)
+		self.__emit('post_status_change', self, [node])
 		return vacancy
 
 	def pop_trefoil(self, nodes):
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
 
-		self.emit('pre_del_trefoil', self, nodes)
-		self.emit('pre_status_change', self, nodes)
+		self.__emit('pre_del_trefoil', self, nodes)
+		self.__emit('pre_status_change', self, nodes)
 
 		id = self.__find_trefoil(nodes)
 		trefoil = self.__trefoils.pop(id)
@@ -178,8 +191,8 @@ class State:
 			self.__nodes[node]['status'] = STATUS_NO_VACANCY
 			self.__nodes[node]['owner'] = None
 
-		self.emit('post_del_trefoil', self, nodes)
-		self.emit('post_status_change', self, nodes)
+		self.__emit('post_del_trefoil', self, nodes)
+		self.__emit('post_status_change', self, nodes)
 		return trefoil
 
 	def __find_vacancy(self, node):
@@ -219,10 +232,6 @@ class State:
 # vacancy will have the same energy barrier regardless of where it is placed.
 # In such cases, these similar Moves are said to be of the same Kind.
 
-
-def flat(it):
-	for x in it:
-		yield from x
 
 # Periodic hexagonal grid, stored in axial coords.
 class Grid:

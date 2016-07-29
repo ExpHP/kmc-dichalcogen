@@ -53,6 +53,12 @@ class State:
 		return out
 
 	#------------------------------------------
+	# THE __nodes CACHE:
+	# A lookup of data for individual nodes.
+
+	# The values of __nodes are like a tagged union.
+	# They are of the form (status, data), where status serves as a descriminator
+	#  for how to interpret the data.
 
 	def validate(self):
 		'''
@@ -68,19 +74,16 @@ class State:
 	def __compute_nodes_lookup(self):
 		''' generates __nodes from __vacancies and __trefoils '''
 		cache = {
-			x: {'status': STATUS_NO_VACANCY, 'owner': None }
+			x: (STATUS_NO_VACANCY, None)
 			for x in self.grid.nodes()
 		}
 
 		for id, v in self.__vacancies.items():
-			node = v['where']
-			cache[node]['status'] = STATUS_DIVACANCY
-			cache[node]['owner'] = id
+			cache[v['where']] = (STATUS_DIVACANCY, id)
 
 		for id, v in self.__trefoils.items():
 			for node in v['where']:
-				cache[node]['status'] = STATUS_TREFOIL_PARTICIPANT
-				cache[node]['owner'] = id
+				cache[v['where']] = (STATUS_TREFOIL_PARTICIPANT, id)
 
 		return cache
 
@@ -95,22 +98,16 @@ class State:
 	#------------------------------------------
 	# Accessors/iterators
 
-	def vacancies(self): return self.__vacancies.__iter__()
-	def vacancy_node(self, id): return self.__vacancies[id]['where']
-	def vacancy_layer(self, id): return self.__vacancies[id]['layer']
-	def vacancies_with_id(self): return self.__vacancies.items()
+	def vacancies(self): return self.__vacancies.values()
 
 	def nodes(self): return self.grid.nodes()
-	def node_status(self, node): return self.__nodes[node]['status']
-	def node_vacancy_id(self, node): return self.__nodes[node]['owner']
+	def node_status(self, node): return self.__nodes[node][0]
 	def nodes_with_status(self): return [(n, self.node_status(n)) for n in self.nodes()]
 
-	def trefoils(self): return self.__trefoils.__iter__()
-	def trefoil_nodes(self, id): return self.__trefoils[id]['where']
-	def trefoils_with_id(self): return self.__trefoils.items()
+	def trefoils(self): return self.__trefoils.values()
 	def trefoil_nodes_at(self, node):
-		id = self.__nodes[node]['owner']
-		if id not in self.__trefoils:
+		(status,id) = self.__nodes[node]
+		if status is not STATUS_TREFOIL_PARTICIPANT:
 			raise KeyError('node not a trefoil')
 		return frozenset(self.__trefoils[id]['where'])
 
@@ -144,8 +141,7 @@ class State:
 
 		id = self.__consume_id()
 		self.__vacancies[id] = {'where': tuple(node)}
-		self.__nodes[node]['status'] = STATUS_DIVACANCY
-		self.__nodes[node]['owner'] = id
+		self.__nodes[node] = (STATUS_DIVACANCY, id)
 
 		self.__emit('post_new_vacancy', self, node)
 		self.__emit('post_status_change', self, [node])
@@ -159,9 +155,8 @@ class State:
 
 		id = self.__consume_id()
 		self.__trefoils[id] = {'where': nodes}
-		for n in nodes:
-			self.__nodes[n]['status'] = STATUS_TREFOIL_PARTICIPANT
-			self.__nodes[n]['owner'] = id
+		for node in nodes:
+			self.__nodes[node] = (STATUS_TREFOIL_PARTICIPANT, id)
 
 		self.__emit('post_new_trefoil', self, nodes)
 		self.__emit('post_status_change', self, nodes)
@@ -172,8 +167,7 @@ class State:
 
 		id = self.__find_vacancy(node)
 		vacancy = self.__vacancies.pop(id)
-		self.__nodes[node]['status'] = STATUS_NO_VACANCY
-		self.__nodes[node]['owner'] = None
+		self.__nodes[node] = (STATUS_NO_VACANCY, None)
 
 		self.__emit('post_del_vacancy', self, node)
 		self.__emit('post_status_change', self, [node])
@@ -189,21 +183,20 @@ class State:
 		id = self.__find_trefoil(nodes)
 		trefoil = self.__trefoils.pop(id)
 		for node in nodes:
-			self.__nodes[node]['status'] = STATUS_NO_VACANCY
-			self.__nodes[node]['owner'] = None
+			self.__nodes[node] = (STATUS_NO_VACANCY, None)
 
 		self.__emit('post_del_trefoil', self, nodes)
 		self.__emit('post_status_change', self, nodes)
 		return trefoil
 
 	def __find_vacancy(self, node):
-		id = self.__nodes[node]['owner']
+		(_,id) = self.__nodes[node]
 		assert self.__vacancies[id]['where'] == node
 		return id
 
 	def __find_trefoil(self, nodes):
 		nodes = frozenset(nodes)
-		id = self.__nodes[next(iter(nodes))]['owner']
+		(_,id) = self.__nodes[next(iter(nodes))]
 		assert self.__trefoils[id]['where'] == nodes
 		return id
 

@@ -53,8 +53,6 @@ class State:
 		return out
 
 	#------------------------------------------
-	# FIXME: I think I may want to switch these dicts out for named tuples,
-	#  to help dodge bugs caused by mispelling keys in __setitem__
 
 	def validate(self):
 		'''
@@ -96,13 +94,6 @@ class State:
 
 	#------------------------------------------
 	# Accessors/iterators
-
-	# FIXME: I thought I deleted all the public member funcs involving
-	#  vacancy/trefoil ids.  Did I stash and forget?
-	# FIXME: Now that vacancies no longer keep their identity when moving
-	#  around, I'm really beginning to feel that the ids are just cruft in
-	#  general. They are currently here because the trefoil/vacancy objects
-	#  are dicts, which are not hashable.
 
 	def vacancies(self): return self.__vacancies.__iter__()
 	def vacancy_node(self, id): return self.__vacancies[id]['where']

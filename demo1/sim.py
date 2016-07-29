@@ -87,10 +87,6 @@ class KmcSim:
 
 		return (counts, sources)
 
-	# FIXME: Would like to have a dry_run flag which makes the function "almost pure".
-	#        It should prevent the 'rule.perform' line, and disable reinitialization
-	#         so long as it isn't necessary.  (the second bit can be accomplished
-	#         via a dirty flag)
 	def perform_random_move(self):
 		'''
 		Select and perform a random change to occur to the state.

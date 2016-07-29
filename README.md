@@ -16,26 +16,50 @@ Updates can be received by doing `git pull` in that folder.
 
 Go to where the "demo1" folder is located (don't go inside it) and run:
 
-    python -m demo1
+    python3 -m demo1 test-cfg.yaml
 
 This runs the script with some not-terribly-well-thought-out default settings.
 For a list of these settings, type:
 
-    python -m demo1 --help
+    python3 -m demo1 --help
 
-There are no input files or config files to speak of at this point in time.
+The config file specifies stuff like
+which events are allowed to occur in the simulation,
+and their rates or energy barriers.
+It is a recent addition and its contents are not documented
+(beyond that it is, obviously, a YAML file)
+on the basis that they are likely to undergo significant change.
 
 The output currently leaves something to be desired.  It is currently just
 JSON output listing the events which occured in the simulation, intended
 to be written to a file for use as input to something else.
-(for instance, the animation script accepts it as input)
+(for instance, the animation script accepts it as input, and there will
+eventually be a post-processing script that uses it to computes rates)
+
+# Testing
+
+A small number of components have unit tests:
+
+    ./tests.sh
+
+The program has a lot of redundant data structures to improve efficiency;
+these can be checked for internal consistency using debug flags like
+`--no-incremental` or `--validate-every`.
+
+Some important higher-level properties like probability distribution
+are difficult to fit into the standard testing model, and will require
+a more scientific approach.
 
 # Dependencies
 
-Python (2 or 3) should be able to run the core script with no additional
-dependencies.
+Requires Python 3 now, mostly because I forgot that I was trying to
+accomodate Python 2 (oopsies).
 
-Side scripts such as `animation.py` may have a large number of additional
-dependencies and I don't plan to keep tabs on all of them here. Ask for
-help if you want to run one of them.
+At the time of writing, the core script requires `numpy` and `tabulate`
+(and the numpy dependence is only used for [one terrible feature][1]
+that I want to eventually remove).  Other scripts may require whatever.
 
+In case this text falls out of date (which it likely will), just try running
+it and ask for help when it fails.
+
+[1]: https://github.com/ExpHP/kmc-dichalcogen/blob/2631c1c372e9df55907b8cc0c8459229c79e7cbf/demo1/incremental.py#L64

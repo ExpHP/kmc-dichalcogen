@@ -23,11 +23,11 @@ def main():
 		help='path to config file')
 
 	parser.add_argument('-d', '--dimensions', metavar='ARM,ZAG',
-		type=delim_parser(positive_int, n=2, sep=','), default=[50,50],
+		type=delim_parser(positive_int, n=2, sep=','), default=[200,200],
 		help='PBC grid dimensions as a number of unit cells in each dimension')
 
 	parser.add_argument('-n', '--steps',
-		type=positive_int, default=20,
+		type=positive_int, default=10000,
 		help='stop after this many events')
 
 	parser.add_argument('-P', '--output-pstats',

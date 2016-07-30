@@ -1,5 +1,6 @@
 from .sim import Rule
 from .sim import DEFAULT_KIND
+from .state import BOTH_LAYERS
 
 # A (likely temporary) intermediate class which abstracts out a very
 # common pattern seen among the implementation of the rules.
@@ -8,9 +9,15 @@ class OneKindRule(Rule):
 		''' Get a list of moves present in the current board whose existence
 		depends on the status of at least one of the given nodes. '''
 		raise NotImplementedError
+	def all_moves(self, state):
+		''' Get all moves present in the current board.
+
+		Ideally, the implementation should look "obviously correct"; at least more so
+		perhaps than ``moves_dependent_on``. It is used for validation purposes. '''
+		raise NotImplementedError
 
 	def initialize_moves(self, state):
-		for move in self.moves_dependent_on(state, state.grid.nodes()):
+		for move in self.all_moves(state):
 			self.add_move(move)
 	def pre_status_change(self, state, nodes):
 		for move in self.moves_dependent_on(state, nodes):
@@ -23,12 +30,18 @@ class OneKindRule(Rule):
 #       that some rules have kinds!
 class MultiKindRule(Rule):
 	def moves_dependent_on(self, state, nodes):
-		''' Get a list of moves present in the current board whose existence
+		''' Get a list of (move,kind)s present in the current board whose existence
 		depends on the status of at least one of the given nodes. '''
+		raise NotImplementedError
+	def all_moves(self, state):
+		''' Get all (move,kind)s present in the current board.
+
+		Ideally, the implementation should look "obviously correct"; at least more so
+		perhaps than ``moves_dependent_on``. It is used for validation purposes. '''
 		raise NotImplementedError
 
 	def initialize_moves(self, state):
-		for move,kind in self.moves_dependent_on(state, state.grid.nodes()):
+		for move,kind in self.all_moves(state):
 			self.add_move(move,kind)
 	def pre_status_change(self, state, nodes):
 		for move,kind in self.moves_dependent_on(state, nodes):
@@ -55,6 +68,9 @@ class RuleCreateDivacancy(OneKindRule):
 	def info(self, node):
 		return { 'node': node }
 
+	def all_moves(self, state):
+		return state.pristine_nodes()
+
 	def moves_dependent_on(self, state, nodes):
 		return filter(state.is_pristine, nodes)
 
@@ -68,6 +84,9 @@ class RuleFillDivacancy(OneKindRule):
 
 	def info(self, node):
 		return { 'node': node }
+
+	def all_moves(self, state):
+		return (vacancy.node for vacancy in state.divacancies())
 
 	def moves_dependent_on(self, state, nodes):
 		return filter(state.is_divacancy, nodes)
@@ -89,15 +108,13 @@ class RuleMoveDivacancy(MultiKindRule):
 	def kinds(self):
 		return [DEFAULT_KIND]
 
-	def moves_dependent_on(self, state, nodes):
-		for n in state.grid.nodes_in_distance_range(nodes, 0, 1):
-			yield from self.moves_from_node(state, n)
+	def all_moves(self, state):
+		for x in state.divacancies():
+			yield from self.moves_from_node(state, x.node)
 
-	# override to avoid an unnecessary bfs
-	def initialize_moves(self, state):
-		for node in state.grid.nodes():
-			for move,kind in self.moves_from_node(state, node):
-				self.add_move(move, kind)
+	def moves_dependent_on(self, state, nodes):
+		for node in state.grid.nodes_in_distance_range(nodes, 0, 1):
+			yield from self.moves_from_node(state, node)
 
 	def moves_from_node(self, state, node):
 		if state.is_divacancy(node):
@@ -120,6 +137,11 @@ class RuleCreateTrefoil(OneKindRule):
 
 	def info(self, nodes):
 		return { 'nodes': list(nodes) }
+
+	def all_moves(self, state):
+		# // lazy :f
+		nodes = [x.node for x in state.divacancies()]
+		return self.moves_dependent_on(state, nodes)
 
 	def moves_dependent_on(self, state, nodes):
 		from itertools import combinations
@@ -151,6 +173,9 @@ class RuleDestroyTrefoil(OneKindRule):
 	def info(self, nodes):
 		return { 'nodes': list(nodes) }
 
+	def all_moves(self, state):
+		return [x.nodes for x in state.trefoils()]
+
 	def moves_dependent_on(self, state, nodes):
 		# find trefoils for which at least one vertex was invalidated
 		remaining = set(filter(state.is_trefoil, nodes))
@@ -168,7 +193,8 @@ class __Rule__Monovacancy(MultiKindRule):
 		assert (layerset != state.vacant_layerset_at(node)), "no-op in move-list!"
 		if state.is_vacancy(node):
 			state.pop_vacancy(node)
-		state.new_vacancy(node, layerset)
+		if layerset != 0:
+			state.new_vacancy(node, layerset)
 
 	def nodes_affected_by(self, move):
 		node, layer, layerset = move
@@ -205,6 +231,16 @@ class RuleCreateMonovacancy(__Rule__Monovacancy):
 	def new_layerset(self, layers, layer):
 		return layers | layer
 
+	def all_moves(self, state):
+		for node in state.pristine_nodes():
+			# introduce a vacancy where there were none
+			yield ((node, 1, 1), 'from-double')
+			yield ((node, 2, 2), 'from-double')
+		for x in state.monovacancies():
+			# eject remaining layer
+			layer = BOTH_LAYERS & ~x.layers
+			yield ((x.node, layer, BOTH_LAYERS), 'make-empty')
+
 class RuleFillMonovacancy(__Rule__Monovacancy):
 	''' Permit a chalcogen to fill a single monovacancy. '''
 	def kinds(self):
@@ -213,4 +249,14 @@ class RuleFillMonovacancy(__Rule__Monovacancy):
 		return 'from-empty' if state.is_divacancy(node) else 'make-double'
 	def new_layerset(self, layers, layer):
 		return layers & ~layer
+
+	def all_moves(self, state):
+		for x in state.divacancies():
+			# remove a vacancy from a divacancy, leaving the other behind
+			yield ((x.node, 1, 2), 'from-empty')
+			yield ((x.node, 2, 1), 'from-empty')
+		for x in state.monovacancies():
+			# remove the only vacancy
+			layer = x.layers
+			yield ((x.node, layer, 0), 'make-double')
 

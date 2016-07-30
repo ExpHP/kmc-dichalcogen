@@ -64,6 +64,7 @@ class State:
 
 		Throws an exception or returns True (for use in assert).
 		'''
+		self.__validate_entity_invariants()
 		self.__validate_nodes_lookup()
 		return True
 
@@ -90,18 +91,27 @@ class State:
 
 		return True
 
+	def __validate_entity_invariants(self):
+		for x in self.__vacancies:
+			if not (1 <= x.layers <= 3):
+				raise AssertionError('vacancy with bad layer: %s' % x.layers)
+
+		return True
+
 	#------------------------------------------
 	# Accessors/iterators
 
 	def pristine_nodes(self): return filter(self.is_pristine, self.grid.nodes())
 
-	def vacancies(self): return self.__vacancies.values()
+	def vacancies(self): return self.__vacancies.__iter__()
+	def divacancies(self): return (x for x in self.__vacancies if x.layers == BOTH_LAYERS)
+	def monovacancies(self): return (x for x in self.__vacancies if x.layers != BOTH_LAYERS)
 
 	def nodes(self): return self.grid.nodes()
 	def node_status(self, node): return self.__nodes[node][0]
 	def nodes_with_status(self): return [(n, self.node_status(n)) for n in self.nodes()]
 
-	def trefoils(self): return self.__trefoils.values()
+	def trefoils(self): return self.__trefoils.__iter__()
 	def trefoil_nodes_at(self, node):
 		(status,trefoil) = self.__nodes[node]
 		if status is not Trefoil:

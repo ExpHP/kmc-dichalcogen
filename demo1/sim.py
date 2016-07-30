@@ -4,9 +4,24 @@ from __future__ import division
 from .incremental import IncrementalMoveCache
 from .kmc import weighted_choice
 
-# Every Rule has at least one kind; for those with one it is usually this:
-# (appears as config key, and as a possible value in MoveCache)
-DEFAULT_KIND = 'natural'
+# An Event is a (physically meaningful) State transition which occurs
+#  through some stochastic process.
+# One randomly chosen Event occurs every step of the computation.
+# The term is used rather loosely.
+
+# A Move is an event that has a fully determined outcome.
+# That is, given an initial State and a Move, the final state is uniquely
+#  specified, without randomness.
+
+# Oftentimes, many Moves can be classified under a single umbrella;
+# e.g. in the absence of second order effects, the action of creating a
+# vacancy will have the same energy barrier regardless of where it is placed.
+# In such cases, these similar Moves are said to be of the same Kind.
+
+# A Rule is an object that produces Moves. Each rule has its own set of Kinds.
+
+# A common name used for Rules with a single Kind
+DEFAULT_KIND = 'natural'  # (used as config key, and key in MoveCache)
 
 # FIXME move
 eV_PER_J = 6.24150913e18

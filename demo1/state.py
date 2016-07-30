@@ -32,7 +32,7 @@ class State:
 
 	def __init__(self, dim):
 		self.grid = Grid(dim)
-		self.__emit = NO_OP
+		self.emit = NO_OP
 		self.__vacancies = set()
 		self.__trefoils = set()
 		self.__nodes = self.__compute_nodes_lookup()
@@ -47,7 +47,7 @@ class State:
 
 		Can be used to enable incremental updates of objects dependent on the state.
 		'''
-		self.__emit = event_manager.emit
+		self.emit = event_manager.emit
 
 	def clone(self):
 		''' Creates a copy of the state (minus event bindings). '''
@@ -55,9 +55,9 @@ class State:
 		#  listeners (and thus they will be recursively cloned)
 		# There's probably a way to structure the code to avoid storing ``emit``
 		# in State in the first place; but I just can't think about it now.
-		(tmp, self.__emit) = (self.__emit, NO_OP)
+		(tmp, self.emit) = (self.emit, NO_OP)
 		out = pickle.loads(pickle.dumps(self))
-		self.__emit = tmp
+		self.emit = tmp
 		return out
 
 	#------------------------------------------
@@ -145,49 +145,34 @@ class State:
 
 	def new_vacancy(self, node):
 		node = tuple(node)
-		self.__emit('pre_status_change', self, [node])
 
 		vacancy = Vacancy(node, LAYERS_BOTH)
 		self.__vacancies.add(vacancy)
 		self.__nodes[node] = (STATUS_DIVACANCY, vacancy)
 
-		self.__emit('post_status_change', self, [node])
-
 	def new_trefoil(self, nodes):
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
-
-		self.__emit('pre_status_change', self, nodes)
 
 		trefoil = Trefoil(nodes)
 		self.__trefoils.add(trefoil)
 		for node in nodes:
 			self.__nodes[node] = (STATUS_TREFOIL_PARTICIPANT, trefoil)
 
-		self.__emit('post_status_change', self, nodes)
-
 	def pop_vacancy(self, node):
-		self.__emit('pre_status_change', self, [node])
-
 		vacancy = self.__find_vacancy(node)
 		self.__vacancies.remove(vacancy)
 		self.__nodes[node] = (STATUS_NO_VACANCY, None)
-
-		self.__emit('post_status_change', self, [node])
 		return vacancy
 
 	def pop_trefoil(self, nodes):
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
 
-		self.__emit('pre_status_change', self, nodes)
-
 		trefoil = self.__find_trefoil(nodes)
 		self.__trefoils.remove(trefoil)
 		for node in nodes:
 			self.__nodes[node] = (STATUS_NO_VACANCY, None)
-
-		self.__emit('post_status_change', self, nodes)
 		return trefoil
 
 	def __find_vacancy(self, node):

@@ -26,7 +26,11 @@ class RuleCreateVacancy(InvalidationBasedRule):
 	def perform(self, node, state):
 		state.new_vacancy(node)
 
-	def info(self, node): return { 'node': node }
+	def nodes_affected_by(self, node):
+		return [node]
+
+	def info(self, node):
+		return { 'node': node }
 
 	def moves_dependent_on(self, state, nodes):
 		return [x for x in nodes if state.node_status(x) is STATUS_NO_VACANCY]
@@ -35,7 +39,11 @@ class RuleFillVacancy(InvalidationBasedRule):
 	def perform(self, node, state):
 		state.pop_vacancy(node)
 
-	def info(self, node): return { 'node': node }
+	def nodes_affected_by(self, node):
+		return [node]
+
+	def info(self, node):
+		return { 'node': node }
 
 	def moves_dependent_on(self, state, nodes):
 		return [x for x in nodes if state.node_status(x) is STATUS_DIVACANCY]
@@ -46,10 +54,15 @@ class RuleMoveVacancy(InvalidationBasedRule):
 		state.pop_vacancy(old)
 		state.new_vacancy(new)
 
+	def nodes_affected_by(self, move):
+		return move # (old, new)
+
 	def info(self, move):
 		(old,new) = move
 		return { 'was': old, 'now': new }
-	def kinds(self): return [DEFAULT_KIND]
+
+	def kinds(self):
+		return [DEFAULT_KIND]
 
 	def moves_dependent_on(self, state, nodes):
 		for n in state.grid.nodes_in_distance_range(nodes, 0, 1):
@@ -74,7 +87,11 @@ class RuleCreateTrefoil(InvalidationBasedRule):
 			state.pop_vacancy(node)
 		state.new_trefoil(nodes)
 
-	def info(self, nodes): return { 'nodes': list(nodes) }
+	def nodes_affected_by(self, nodes):
+		return nodes
+
+	def info(self, nodes):
+		return { 'nodes': list(nodes) }
 
 	def moves_dependent_on(self, state, nodes):
 		from itertools import combinations
@@ -101,6 +118,9 @@ class RuleDestroyTrefoil(InvalidationBasedRule):
 		state.pop_trefoil(nodes)
 		for node in nodes:
 			state.new_vacancy(node)
+
+	def nodes_affected_by(self, nodes):
+		return nodes
 
 	def info(self, nodes): return { 'nodes': list(nodes) }
 

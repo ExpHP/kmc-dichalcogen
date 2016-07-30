@@ -109,8 +109,8 @@ class KmcSim:
 		move = rule.move_cache.random_by_kind(kind,
 			sources[rule], check_total=counts[(rule,kind)])
 
-		# Perform it.
-		rule.perform(move, self.state) # CAUTION: Mutates the State and MoveCache
+		# Perform it. (all mutation occurs here!)
+		self.perform_given_move(rule, move)
 
 		# Produce a summary of what happened.
 		return {
@@ -118,6 +118,16 @@ class KmcSim:
 			'rate': self.rate(rule, kind),
 			'total_rate': fsum(r for (_,r) in k_w_pairs),
 		}
+
+	def perform_given_move(self, rule, move):
+		'''
+		Perform a selected move, modifying the state and all objects that depend on it.
+		'''
+		affected_nodes = tuple(rule.nodes_affected_by(move))
+
+		self.state.emit('pre_status_change', self.state, affected_nodes)
+		rule.perform(move, self.state)
+		self.state.emit('post_status_change', self.state, affected_nodes)
 
 	def validate(self):
 		'''
@@ -223,6 +233,11 @@ class Rule:
 	def initialize_moves(self, initial_state):
 		''' Callback to set up the list of moves in move_cache from scratch.
 		(assuming it is initially empty). '''
+		raise NotImplementedError
+
+	def nodes_affected_by(self, move):
+		''' Get an iterable of nodes whose status may change as a result of a move.
+		(these will be the nodes that show in the status_change event)'''
 		raise NotImplementedError
 
 	# make debug output more readible

@@ -145,21 +145,18 @@ class State:
 
 	def new_vacancy(self, node):
 		node = tuple(node)
-		self.__emit('pre_new_vacancy', self, node)
 		self.__emit('pre_status_change', self, [node])
 
 		vacancy = Vacancy(node, LAYERS_BOTH)
 		self.__vacancies.add(vacancy)
 		self.__nodes[node] = (STATUS_DIVACANCY, vacancy)
 
-		self.__emit('post_new_vacancy', self, node)
 		self.__emit('post_status_change', self, [node])
 
 	def new_trefoil(self, nodes):
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
 
-		self.__emit('pre_new_trefoil', self, nodes)
 		self.__emit('pre_status_change', self, nodes)
 
 		trefoil = Trefoil(nodes)
@@ -167,18 +164,15 @@ class State:
 		for node in nodes:
 			self.__nodes[node] = (STATUS_TREFOIL_PARTICIPANT, trefoil)
 
-		self.__emit('post_new_trefoil', self, nodes)
 		self.__emit('post_status_change', self, nodes)
 
 	def pop_vacancy(self, node):
-		self.__emit('pre_del_vacancy', self, node)
 		self.__emit('pre_status_change', self, [node])
 
 		vacancy = self.__find_vacancy(node)
 		self.__vacancies.remove(vacancy)
 		self.__nodes[node] = (STATUS_NO_VACANCY, None)
 
-		self.__emit('post_del_vacancy', self, node)
 		self.__emit('post_status_change', self, [node])
 		return vacancy
 
@@ -186,7 +180,6 @@ class State:
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
 
-		self.__emit('pre_del_trefoil', self, nodes)
 		self.__emit('pre_status_change', self, nodes)
 
 		trefoil = self.__find_trefoil(nodes)
@@ -194,7 +187,6 @@ class State:
 		for node in nodes:
 			self.__nodes[node] = (STATUS_NO_VACANCY, None)
 
-		self.__emit('post_del_trefoil', self, nodes)
 		self.__emit('post_status_change', self, nodes)
 		return trefoil
 

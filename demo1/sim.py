@@ -238,15 +238,7 @@ class Rule:
 		assert self.move_cache.has_move(move)
 		self.move_cache.clear_all(move)
 
-VALID_EVENTS = set([
-	# FIXME should remove these other events if I still find no use for them
-	#       after a sufficient period of time; status_change is really handy
-	'pre_new_vacancy', 'post_new_vacancy',
-	'pre_del_vacancy', 'post_del_vacancy',
-	'pre_new_trefoil', 'post_new_trefoil',
-	'pre_del_trefoil', 'post_del_trefoil',
-	'pre_status_change', 'post_status_change',
-])
+VALID_EVENTS = set(['pre_status_change', 'post_status_change'])
 # alternatively we could use decorators to tag methods that are handlers
 # but then I would worry about bugs due to forgetting to tag one
 def looks_like_handler(attrname):

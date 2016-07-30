@@ -39,6 +39,11 @@ class MultiKindRule(Rule):
 
 #-------------------------------------------------------------------------
 
+# NOTE: Frequently two rules which are "inverses" of each other have a lot of
+#       similarities in their implementation.  In some cases the rules are small
+#       enough that they're still easy enough to maintain; in other cases the
+#       similar bits may be "rehacktored" out into an intermediate class.
+
 class RuleCreateDivacancy(OneKindRule):
 	''' Permit a pristine chalcogen pair to turn directly into a divacancy. '''
 	def perform(self, node, state):
@@ -101,6 +106,8 @@ class RuleMoveDivacancy(MultiKindRule):
 					kind = DEFAULT_KIND # FIXME
 					yield ((node, nbr), kind)
 
+#-------------------------------------------------------------------------
+
 class RuleCreateTrefoil(OneKindRule):
 	''' Permit 3 divacancies to rotate into a trefoil defect. '''
 	def perform(self, nodes, state):
@@ -151,4 +158,59 @@ class RuleDestroyTrefoil(OneKindRule):
 			trefoil_nodes = frozenset(state.trefoil_nodes_at(remaining.pop()))
 			remaining -= trefoil_nodes # skip dupes
 			yield trefoil_nodes
+
+#-------------------------------------------------------------------------
+
+# Common attributes for Create/FillMonovacancy
+class __Rule__Monovacancy(MultiKindRule):
+	def perform(self, move, state):
+		node, layer, layerset = move
+		assert (layerset != state.vacant_layerset_at(node)), "no-op in move-list!"
+		if state.is_vacancy(node):
+			state.pop_vacancy(node)
+		state.new_vacancy(node, layerset)
+
+	def nodes_affected_by(self, move):
+		node, layer, layerset = move
+		return [node]
+
+	def info(self, move):
+		node, layer, layerset = move
+		return { 'node': node, 'layer': layer }
+
+	def moves_dependent_on(self, state, nodes):
+		for node in filter(state.has_defined_layerset, nodes):
+			kind = self.getkind(state, node)
+			old_layerset = state.vacant_layerset_at(node)
+			for layer in [1,2]:
+				new_layerset = self.new_layerset(old_layerset, layer)
+				if new_layerset != old_layerset:
+					yield ((node, layer, new_layerset), kind)
+
+	def getkind(self, state, node):     raise NotImplementedError
+	def new_layerset(self, layerset, layer): raise NotImplementedError
+
+# Kinds are named to make the inverse relationships clear;
+# CreateMonovacancy:from-double is the inverse of FillMonovacancy:make-double
+#
+# The names are unambiguous (or at least, there's only one valid interpretation
+#  given which kinds belong to which rule, which is that "double" and "empty"
+#  refer to number of chalcogens present)
+class RuleCreateMonovacancy(__Rule__Monovacancy):
+	''' Permit a single chalcogen to be ejected from any site. '''
+	def kinds(self):
+		return ['from-double', 'make-empty']
+	def getkind(self, state, node):
+		return 'from-double' if state.is_empty(node) else 'make-empty'
+	def new_layerset(self, layers, layer):
+		return layers | layer
+
+class RuleFillMonovacancy(__Rule__Monovacancy):
+	''' Permit a chalcogen to fill a single monovacancy. '''
+	def kinds(self):
+		return ['make-double', 'from-empty']
+	def getkind(self, state, node):
+		return 'from-empty' if state.is_divacancy(node) else 'make-double'
+	def new_layerset(self, layers, layer):
+		return layers & ~layer
 

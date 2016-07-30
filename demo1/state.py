@@ -106,6 +106,14 @@ class State:
 			raise KeyError('node not a trefoil')
 		return frozenset(trefoil.nodes)
 
+	def vacant_layerset_at(self, node):
+		''' Get the layers value (an int to manipulate as a bitset) of a node.
+		0 = no vacancies, 1 or 2 = monovacancy, 3 = divacancy '''
+		(status,vacancy) = self.__nodes[node]
+		if status is Empty: return 0
+		elif status is Vacancy: return vacancy.layers
+		else: raise KeyError('monovacancy layers not defined at node')
+
 	#------------------------------------------
 	# Public mutators
 	# These are discrete actions which modify the State and perform
@@ -207,10 +215,17 @@ class State:
 		return tag is Trefoil
 
 	def is_empty(self, node):
-		''' Test that a node is empty. '''
+		''' Test that a node is pristine. (i.e. all atoms are present)'''
 		tag, data = self.__nodes[node]
 		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
 		return tag is Empty
+
+	def has_defined_layerset(self, node):
+		''' Test that a node has a well-defined set of monovacancies.
+		True for empty nodes, monovacancies and divacancies. '''
+		tag, data = self.__nodes[node]
+		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
+		return tag is not Trefoil
 
 
 # Periodic hexagonal grid, stored in axial coords.

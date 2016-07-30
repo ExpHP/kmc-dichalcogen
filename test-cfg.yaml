@@ -1,9 +1,18 @@
 rules:
-  RuleCreateDivacancy:
-    rate: 10.5
-  RuleFillDivacancy:
-    rate:
-      natural: 3.0
+#  RuleCreateDivacancy:
+#    rate: 10.5
+#  RuleFillDivacancy:
+#    rate:
+#      natural: 3.0
+  RuleCreateMonovacancy:
+     rate:
+       from-double:  10
+       make-empty:  300
+  RuleFillMonovacancy:
+     rate:
+       make-double: 100
+       from-empty:  100
+  RuleCreateDivacancy: {rate: 10}
   RuleMoveDivacancy:
     rate:
       natural: 12.0

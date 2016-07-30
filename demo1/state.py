@@ -18,7 +18,15 @@ STATUS_TREFOIL_PARTICIPANT = 2
 # (appears as config key, and as a possible value in MoveCache)
 DEFAULT_KIND = 'natural'
 
+LAYERS_1 = 1
+LAYERS_2 = 2
+LAYERS_BOTH = 3
+
 def NO_OP(*a, **kw): pass
+
+from collections import namedtuple
+Vacancy = namedtuple('Vacancy', ['node', 'layers'])
+Trefoil = namedtuple('Trefoil', ['nodes'])
 
 class State:
 
@@ -78,12 +86,12 @@ class State:
 			for x in self.grid.nodes()
 		}
 
-		for id, v in self.__vacancies.items():
-			cache[v['where']] = (STATUS_DIVACANCY, id)
+		for (id, (node,layers)) in self.__vacancies.items():
+			cache[node] = (STATUS_DIVACANCY, id)
 
-		for id, v in self.__trefoils.items():
-			for node in v['where']:
-				cache[v['where']] = (STATUS_TREFOIL_PARTICIPANT, id)
+		for (id, (nodes,)) in self.__trefoils.items():
+			for node in nodes:
+				cache[node] = (STATUS_TREFOIL_PARTICIPANT, id)
 
 		return cache
 
@@ -109,7 +117,7 @@ class State:
 		(status,id) = self.__nodes[node]
 		if status is not STATUS_TREFOIL_PARTICIPANT:
 			raise KeyError('node not a trefoil')
-		return frozenset(self.__trefoils[id]['where'])
+		return frozenset(self.__trefoils[id].nodes)
 
 	#------------------------------------------
 	# Public mutators
@@ -136,11 +144,12 @@ class State:
 	#   as well; not this class.
 
 	def new_vacancy(self, node):
+		node = tuple(node)
 		self.__emit('pre_new_vacancy', self, node)
 		self.__emit('pre_status_change', self, [node])
 
 		id = self.__consume_id()
-		self.__vacancies[id] = {'where': tuple(node)}
+		self.__vacancies[id] = Vacancy(node, LAYERS_BOTH)
 		self.__nodes[node] = (STATUS_DIVACANCY, id)
 
 		self.__emit('post_new_vacancy', self, node)
@@ -154,7 +163,7 @@ class State:
 		self.__emit('pre_status_change', self, nodes)
 
 		id = self.__consume_id()
-		self.__trefoils[id] = {'where': nodes}
+		self.__trefoils[id] = Trefoil(nodes)
 		for node in nodes:
 			self.__nodes[node] = (STATUS_TREFOIL_PARTICIPANT, id)
 
@@ -191,13 +200,13 @@ class State:
 
 	def __find_vacancy(self, node):
 		(_,id) = self.__nodes[node]
-		assert self.__vacancies[id]['where'] == node
+		assert self.__vacancies[id].node == node
 		return id
 
 	def __find_trefoil(self, nodes):
 		nodes = frozenset(nodes)
 		(_,id) = self.__nodes[next(iter(nodes))]
-		assert self.__trefoils[id]['where'] == nodes
+		assert self.__trefoils[id].nodes == nodes
 		return id
 
 

@@ -33,8 +33,8 @@ class State:
 	def __init__(self, dim):
 		self.grid = Grid(dim)
 		self.__emit = NO_OP
-		self.__vacancies = {}
-		self.__trefoils = {}
+		self.__vacancies = set()
+		self.__trefoils = set()
 		self.__nodes = self.__compute_nodes_lookup()
 		self.__next_id = 0
 
@@ -86,12 +86,12 @@ class State:
 			for x in self.grid.nodes()
 		}
 
-		for (id, (node,layers)) in self.__vacancies.items():
-			cache[node] = (STATUS_DIVACANCY, id)
+		for vacancy in self.__vacancies:
+			cache[vacancy.node] = (STATUS_DIVACANCY, vacancy)
 
-		for (id, (nodes,)) in self.__trefoils.items():
-			for node in nodes:
-				cache[node] = (STATUS_TREFOIL_PARTICIPANT, id)
+		for trefoil in self.__trefoils:
+			for node in trefoil.nodes:
+				cache[node] = (STATUS_TREFOIL_PARTICIPANT, trefoil)
 
 		return cache
 
@@ -114,10 +114,10 @@ class State:
 
 	def trefoils(self): return self.__trefoils.values()
 	def trefoil_nodes_at(self, node):
-		(status,id) = self.__nodes[node]
+		(status,trefoil) = self.__nodes[node]
 		if status is not STATUS_TREFOIL_PARTICIPANT:
 			raise KeyError('node not a trefoil')
-		return frozenset(self.__trefoils[id].nodes)
+		return frozenset(trefoil.nodes)
 
 	#------------------------------------------
 	# Public mutators
@@ -148,9 +148,9 @@ class State:
 		self.__emit('pre_new_vacancy', self, node)
 		self.__emit('pre_status_change', self, [node])
 
-		id = self.__consume_id()
-		self.__vacancies[id] = Vacancy(node, LAYERS_BOTH)
-		self.__nodes[node] = (STATUS_DIVACANCY, id)
+		vacancy = Vacancy(node, LAYERS_BOTH)
+		self.__vacancies.add(vacancy)
+		self.__nodes[node] = (STATUS_DIVACANCY, vacancy)
 
 		self.__emit('post_new_vacancy', self, node)
 		self.__emit('post_status_change', self, [node])
@@ -162,10 +162,10 @@ class State:
 		self.__emit('pre_new_trefoil', self, nodes)
 		self.__emit('pre_status_change', self, nodes)
 
-		id = self.__consume_id()
-		self.__trefoils[id] = Trefoil(nodes)
+		trefoil = Trefoil(nodes)
+		self.__trefoils.add(trefoil)
 		for node in nodes:
-			self.__nodes[node] = (STATUS_TREFOIL_PARTICIPANT, id)
+			self.__nodes[node] = (STATUS_TREFOIL_PARTICIPANT, trefoil)
 
 		self.__emit('post_new_trefoil', self, nodes)
 		self.__emit('post_status_change', self, nodes)
@@ -174,8 +174,8 @@ class State:
 		self.__emit('pre_del_vacancy', self, node)
 		self.__emit('pre_status_change', self, [node])
 
-		id = self.__find_vacancy(node)
-		vacancy = self.__vacancies.pop(id)
+		vacancy = self.__find_vacancy(node)
+		self.__vacancies.remove(vacancy)
 		self.__nodes[node] = (STATUS_NO_VACANCY, None)
 
 		self.__emit('post_del_vacancy', self, node)
@@ -189,8 +189,8 @@ class State:
 		self.__emit('pre_del_trefoil', self, nodes)
 		self.__emit('pre_status_change', self, nodes)
 
-		id = self.__find_trefoil(nodes)
-		trefoil = self.__trefoils.pop(id)
+		trefoil = self.__find_trefoil(nodes)
+		self.__trefoils.remove(trefoil)
 		for node in nodes:
 			self.__nodes[node] = (STATUS_NO_VACANCY, None)
 
@@ -199,27 +199,17 @@ class State:
 		return trefoil
 
 	def __find_vacancy(self, node):
-		(_,id) = self.__nodes[node]
-		assert self.__vacancies[id].node == node
-		return id
+		(status,vacancy) = self.__nodes[node]
+		assert status is STATUS_DIVACANCY
+		assert vacancy.node == node
+		return vacancy
 
 	def __find_trefoil(self, nodes):
 		nodes = frozenset(nodes)
-		(_,id) = self.__nodes[next(iter(nodes))]
-		assert self.__trefoils[id].nodes == nodes
-		return id
-
-
-	#------------------------------------------
-	# Low-level mutators
-	# These do not necessarily leave the object in a consistent state.
-
-	def __consume_id(self):
-		id = self.__next_id
-		self.__next_id = self.__next_id + 1
-		assert id not in self.__vacancies
-		assert id not in self.__trefoils
-		return id
+		(status,trefoil) = self.__nodes[next(iter(nodes))]
+		assert status is STATUS_TREFOIL_PARTICIPANT
+		assert trefoil.nodes == nodes
+		return trefoil
 
 
 # An Event is a (physically meaningful) State transition which occurs

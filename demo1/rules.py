@@ -1,6 +1,5 @@
 from .sim import Rule
 from .sim import DEFAULT_KIND
-from .state import Empty, Vacancy, Trefoil
 
 # A (likely temporary) intermediate class which abstracts out a very
 # common pattern seen among the implementation of the rules.
@@ -22,9 +21,9 @@ class InvalidationBasedRule(Rule):
 
 #-------------------------------------------------------------------------
 
-class RuleCreateVacancy(InvalidationBasedRule):
+class RuleCreateDivacancy(InvalidationBasedRule):
 	def perform(self, node, state):
-		state.new_vacancy(node)
+		state.new_divacancy(node)
 
 	def nodes_affected_by(self, node):
 		return [node]
@@ -33,11 +32,11 @@ class RuleCreateVacancy(InvalidationBasedRule):
 		return { 'node': node }
 
 	def moves_dependent_on(self, state, nodes):
-		return [x for x in nodes if state.node_status(x) is Empty]
+		return filter(state.is_empty, nodes)
 
-class RuleFillVacancy(InvalidationBasedRule):
+class RuleFillDivacancy(InvalidationBasedRule):
 	def perform(self, node, state):
-		state.pop_vacancy(node)
+		state.pop_divacancy(node)
 
 	def nodes_affected_by(self, node):
 		return [node]
@@ -46,13 +45,13 @@ class RuleFillVacancy(InvalidationBasedRule):
 		return { 'node': node }
 
 	def moves_dependent_on(self, state, nodes):
-		return [x for x in nodes if state.node_status(x) is Vacancy]
+		return filter(state.is_divacancy, nodes)
 
-class RuleMoveVacancy(InvalidationBasedRule):
+class RuleMoveDivacancy(InvalidationBasedRule):
 	def perform(self, move, state):
 		(old,new) = move
-		state.pop_vacancy(old)
-		state.new_vacancy(new)
+		state.pop_divacancy(old)
+		state.new_divacancy(new)
 
 	def nodes_affected_by(self, move):
 		return move # (old, new)
@@ -75,16 +74,16 @@ class RuleMoveVacancy(InvalidationBasedRule):
 				self.add_move(move)
 
 	def moves_from_node(self, state, node):
-		if state.node_status(node) is Vacancy:
+		if state.is_divacancy(node):
 			for nbr in state.grid.neighbors(node):
-				if state.node_status(nbr) is Empty:
+				if state.is_empty(nbr):
 					yield (node, nbr)
 
 class RuleCreateTrefoil(InvalidationBasedRule):
 	''' Allows 3 divacancies to rotate into a trefoil defect. '''
 	def perform(self, nodes, state):
 		for node in nodes:
-			state.pop_vacancy(node)
+			state.pop_divacancy(node)
 		state.new_trefoil(nodes)
 
 	def nodes_affected_by(self, nodes):
@@ -97,8 +96,7 @@ class RuleCreateTrefoil(InvalidationBasedRule):
 		from itertools import combinations
 
 		def inner(nodes):
-			def can_become_trefoil(node):
-				return state.node_status(node) is Vacancy
+			can_become_trefoil = state.is_divacancy
 
 			# find trefoil-ready groups in which at least one vertex was invalidated
 			nodes = list(filter(can_become_trefoil, nodes))
@@ -117,16 +115,17 @@ class RuleDestroyTrefoil(InvalidationBasedRule):
 	def perform(self, nodes, state):
 		state.pop_trefoil(nodes)
 		for node in nodes:
-			state.new_vacancy(node)
+			state.new_divacancy(node)
 
 	def nodes_affected_by(self, nodes):
 		return nodes
 
-	def info(self, nodes): return { 'nodes': list(nodes) }
+	def info(self, nodes):
+		return { 'nodes': list(nodes) }
 
 	def moves_dependent_on(self, state, nodes):
 		# find trefoils for which at least one vertex was invalidated
-		remaining = {x for x in nodes if state.node_status(x) is Trefoil}
+		remaining = set(filter(state.is_trefoil, nodes))
 		while remaining:
 			trefoil_nodes = frozenset(state.trefoil_nodes_at(remaining.pop()))
 			remaining -= trefoil_nodes # skip dupes

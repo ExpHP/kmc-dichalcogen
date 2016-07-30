@@ -13,9 +13,11 @@ except ImportError: import pickle
 # (appears as config key, and as a possible value in MoveCache)
 DEFAULT_KIND = 'natural'
 
-LAYERS_1 = 1
-LAYERS_2 = 2
-LAYERS_BOTH = 3
+# These constants are for named for purposes of clarity, not for abstraction;
+# Most of the code WILL assume that they have these numeric values,
+#  and may use bitwise operations to manipulate them.
+LAYERS = [1,2]   # possible values of "layers" for monovacancy
+BOTH_LAYERS = 3  # value of "layers" for divacancy
 
 # These namedtuples are used together with their type as a tagged union;
 # e.g.  (type(obj), obj), where the type serves as the discriminator.
@@ -119,29 +121,44 @@ class State:
 	#   modifying the State.  Any other operations are composed of these.
 	# * They must be members of State so that they can modify private members.
 
-	def new_vacancy(self, node):
-		node = tuple(node)
+	def new_divacancy(self, node):
+		''' Turn an empty node into a divacancy. '''
+		self.new_vacancy(node, BOTH_LAYERS)
 
-		vacancy = Vacancy(node, LAYERS_BOTH)
+	def new_vacancy(self, node, layers):
+		''' Turn an empty node into a mono- or divacancy. '''
+		node = tuple(node)
+		assert self.is_empty(node)
+
+		vacancy = Vacancy(node, layers)
 		self.__vacancies.add(vacancy)
 		self.__nodes[node] = (Vacancy, vacancy)
 
 	def new_trefoil(self, nodes):
+		''' Turn three empty nodes into a trefoil. '''
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
+		assert all(map(self.is_empty, nodes))
 
 		trefoil = Trefoil(nodes)
 		self.__trefoils.add(trefoil)
 		for node in nodes:
 			self.__nodes[node] = (Trefoil, trefoil)
 
+	def pop_divacancy(self, node):
+		''' Turn a divacancy into an empty node. '''
+		assert self.is_divacancy(node)
+		self.pop_vacancy(node)
+
 	def pop_vacancy(self, node):
+		''' Turn a mono- or divacancy into an empty node. '''
 		vacancy = self.__find_vacancy(node)
 		self.__vacancies.remove(vacancy)
 		self.__nodes[node] = EMPTY_ENTRY
 		return vacancy
 
 	def pop_trefoil(self, nodes):
+		''' Turn a trefoil into three empty nodes. '''
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
 
@@ -164,6 +181,36 @@ class State:
 		assert trefoil.nodes == nodes
 		return trefoil
 
+	#------------------------------------------
+	def is_monovacancy(self, node):
+		''' Test that a node is a monovacancy. '''
+		tag, data = self.__nodes[node]
+		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
+		return tag is Vacancy and data.layers in LAYERS
+
+	def is_divacancy(self, node):
+		''' Test that a node is a divacancy. '''
+		tag, data = self.__nodes[node]
+		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
+		return tag is Vacancy and data.layers == BOTH_LAYERS
+
+	def is_vacancy(self, node):
+		''' Test that a node is a mono or divacancy. '''
+		tag, data = self.__nodes[node]
+		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
+		return tag is Vacancy
+
+	def is_trefoil(self, node):
+		''' Test that a node is in a trefoil. '''
+		tag, data = self.__nodes[node]
+		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
+		return tag is Trefoil
+
+	def is_empty(self, node):
+		''' Test that a node is empty. '''
+		tag, data = self.__nodes[node]
+		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
+		return tag is Empty
 
 
 # Periodic hexagonal grid, stored in axial coords.

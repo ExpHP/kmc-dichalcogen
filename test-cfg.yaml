@@ -1,10 +1,10 @@
 rules:
-  RuleCreateVacancy:
+  RuleCreateDivacancy:
     rate: 10.5
-  RuleFillVacancy:
+  RuleFillDivacancy:
     rate:
       natural: 3.0
-  RuleMoveVacancy:
+  RuleMoveDivacancy:
     rate:
       natural: 12.0
       near-two: 3.0

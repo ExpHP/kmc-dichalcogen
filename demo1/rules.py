@@ -1,6 +1,6 @@
 from .sim import Rule
 from .sim import DEFAULT_KIND
-from .state import STATUS_NO_VACANCY, STATUS_DIVACANCY, STATUS_TREFOIL_PARTICIPANT
+from .state import Empty, Vacancy, Trefoil
 
 # A (likely temporary) intermediate class which abstracts out a very
 # common pattern seen among the implementation of the rules.
@@ -33,7 +33,7 @@ class RuleCreateVacancy(InvalidationBasedRule):
 		return { 'node': node }
 
 	def moves_dependent_on(self, state, nodes):
-		return [x for x in nodes if state.node_status(x) is STATUS_NO_VACANCY]
+		return [x for x in nodes if state.node_status(x) is Empty]
 
 class RuleFillVacancy(InvalidationBasedRule):
 	def perform(self, node, state):
@@ -46,7 +46,7 @@ class RuleFillVacancy(InvalidationBasedRule):
 		return { 'node': node }
 
 	def moves_dependent_on(self, state, nodes):
-		return [x for x in nodes if state.node_status(x) is STATUS_DIVACANCY]
+		return [x for x in nodes if state.node_status(x) is Vacancy]
 
 class RuleMoveVacancy(InvalidationBasedRule):
 	def perform(self, move, state):
@@ -75,9 +75,9 @@ class RuleMoveVacancy(InvalidationBasedRule):
 				self.add_move(move)
 
 	def moves_from_node(self, state, node):
-		if state.node_status(node) is STATUS_DIVACANCY:
+		if state.node_status(node) is Vacancy:
 			for nbr in state.grid.neighbors(node):
-				if state.node_status(nbr) is STATUS_NO_VACANCY:
+				if state.node_status(nbr) is Empty:
 					yield (node, nbr)
 
 class RuleCreateTrefoil(InvalidationBasedRule):
@@ -98,7 +98,7 @@ class RuleCreateTrefoil(InvalidationBasedRule):
 
 		def inner(nodes):
 			def can_become_trefoil(node):
-				return state.node_status(node) == STATUS_DIVACANCY
+				return state.node_status(node) is Vacancy
 
 			# find trefoil-ready groups in which at least one vertex was invalidated
 			nodes = list(filter(can_become_trefoil, nodes))
@@ -126,7 +126,7 @@ class RuleDestroyTrefoil(InvalidationBasedRule):
 
 	def moves_dependent_on(self, state, nodes):
 		# find trefoils for which at least one vertex was invalidated
-		remaining = {x for x in nodes if state.node_status(x) is STATUS_TREFOIL_PARTICIPANT}
+		remaining = {x for x in nodes if state.node_status(x) is Trefoil}
 		while remaining:
 			trefoil_nodes = frozenset(state.trefoil_nodes_at(remaining.pop()))
 			remaining -= trefoil_nodes # skip dupes

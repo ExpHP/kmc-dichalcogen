@@ -9,11 +9,6 @@ from .validate import validate_dict
 try: import cPickle as pickle
 except ImportError: import pickle
 
-# Node occupation flags used in the node status cache
-STATUS_NO_VACANCY = 0
-STATUS_DIVACANCY = 1
-STATUS_TREFOIL_PARTICIPANT = 2
-
 # Every Rule has at least one kind; for those with one it is usually this:
 # (appears as config key, and as a possible value in MoveCache)
 DEFAULT_KIND = 'natural'
@@ -22,9 +17,20 @@ LAYERS_1 = 1
 LAYERS_2 = 2
 LAYERS_BOTH = 3
 
+# These namedtuples are used together with their type as a tagged union;
+# e.g.  (type(obj), obj), where the type serves as the discriminator.
+#
+# (the explicit discriminator is because namedtuples are (unfortunately)
+#  designed to be compatible with tuples, which means their __eq__ and
+#  __hash__ methods do not care about the type)
 from collections import namedtuple
+Empty = namedtuple('Empty', [])
 Vacancy = namedtuple('Vacancy', ['node', 'layers'])
 Trefoil = namedtuple('Trefoil', ['nodes'])
+
+# only need one instance
+EMPTY = Empty()
+EMPTY_ENTRY = (Empty, EMPTY)
 
 class State:
 
@@ -63,17 +69,14 @@ class State:
 	# Rules must strive to preserve this definition.
 	def __compute_nodes_lookup(self):
 		''' generates __nodes from __vacancies and __trefoils '''
-		cache = {
-			x: (STATUS_NO_VACANCY, None)
-			for x in self.grid.nodes()
-		}
+		cache = { x:EMPTY_ENTRY for x in self.grid.nodes() }
 
 		for vacancy in self.__vacancies:
-			cache[vacancy.node] = (STATUS_DIVACANCY, vacancy)
+			cache[vacancy.node] = (Vacancy, vacancy)
 
 		for trefoil in self.__trefoils:
 			for node in trefoil.nodes:
-				cache[node] = (STATUS_TREFOIL_PARTICIPANT, trefoil)
+				cache[node] = (Trefoil, trefoil)
 
 		return cache
 
@@ -97,7 +100,7 @@ class State:
 	def trefoils(self): return self.__trefoils.values()
 	def trefoil_nodes_at(self, node):
 		(status,trefoil) = self.__nodes[node]
-		if status is not STATUS_TREFOIL_PARTICIPANT:
+		if status is not Trefoil:
 			raise KeyError('node not a trefoil')
 		return frozenset(trefoil.nodes)
 
@@ -121,7 +124,7 @@ class State:
 
 		vacancy = Vacancy(node, LAYERS_BOTH)
 		self.__vacancies.add(vacancy)
-		self.__nodes[node] = (STATUS_DIVACANCY, vacancy)
+		self.__nodes[node] = (Vacancy, vacancy)
 
 	def new_trefoil(self, nodes):
 		nodes = frozenset(map(tuple, nodes))
@@ -130,12 +133,12 @@ class State:
 		trefoil = Trefoil(nodes)
 		self.__trefoils.add(trefoil)
 		for node in nodes:
-			self.__nodes[node] = (STATUS_TREFOIL_PARTICIPANT, trefoil)
+			self.__nodes[node] = (Trefoil, trefoil)
 
 	def pop_vacancy(self, node):
 		vacancy = self.__find_vacancy(node)
 		self.__vacancies.remove(vacancy)
-		self.__nodes[node] = (STATUS_NO_VACANCY, None)
+		self.__nodes[node] = EMPTY_ENTRY
 		return vacancy
 
 	def pop_trefoil(self, nodes):
@@ -145,19 +148,19 @@ class State:
 		trefoil = self.__find_trefoil(nodes)
 		self.__trefoils.remove(trefoil)
 		for node in nodes:
-			self.__nodes[node] = (STATUS_NO_VACANCY, None)
+			self.__nodes[node] = EMPTY_ENTRY
 		return trefoil
 
 	def __find_vacancy(self, node):
 		(status,vacancy) = self.__nodes[node]
-		assert status is STATUS_DIVACANCY
+		assert status is Vacancy
 		assert vacancy.node == node
 		return vacancy
 
 	def __find_trefoil(self, nodes):
 		nodes = frozenset(nodes)
 		(status,trefoil) = self.__nodes[next(iter(nodes))]
-		assert status is STATUS_TREFOIL_PARTICIPANT
+		assert status is Trefoil
 		assert trefoil.nodes == nodes
 		return trefoil
 

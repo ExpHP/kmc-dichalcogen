@@ -56,7 +56,7 @@ class RuleCreateDivacancy(OneKindRule):
 		return { 'node': node }
 
 	def moves_dependent_on(self, state, nodes):
-		return filter(state.is_empty, nodes)
+		return filter(state.is_pristine, nodes)
 
 class RuleFillDivacancy(OneKindRule):
 	''' Permit a divacancy to be completely filled in one step. '''
@@ -102,7 +102,7 @@ class RuleMoveDivacancy(MultiKindRule):
 	def moves_from_node(self, state, node):
 		if state.is_divacancy(node):
 			for nbr in state.grid.neighbors(node):
-				if state.is_empty(nbr):
+				if state.is_pristine(nbr):
 					kind = DEFAULT_KIND # FIXME
 					yield ((node, nbr), kind)
 
@@ -201,7 +201,7 @@ class RuleCreateMonovacancy(__Rule__Monovacancy):
 	def kinds(self):
 		return ['from-double', 'make-empty']
 	def getkind(self, state, node):
-		return 'from-double' if state.is_empty(node) else 'make-empty'
+		return 'from-double' if state.is_pristine(node) else 'make-empty'
 	def new_layerset(self, layers, layer):
 		return layers | layer
 

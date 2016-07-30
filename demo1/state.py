@@ -26,13 +26,13 @@ BOTH_LAYERS = 3  # value of "layers" for divacancy
 #  designed to be compatible with tuples, which means their __eq__ and
 #  __hash__ methods do not care about the type)
 from collections import namedtuple
-Empty = namedtuple('Empty', [])
+Pristine = namedtuple('Pristine', [])
 Vacancy = namedtuple('Vacancy', ['node', 'layers'])
 Trefoil = namedtuple('Trefoil', ['nodes'])
 
 # only need one instance
-EMPTY = Empty()
-EMPTY_ENTRY = (Empty, EMPTY)
+PRISTINE = Pristine()
+PRISTINE_ENTRY = (Pristine, PRISTINE)
 
 class State:
 
@@ -71,7 +71,7 @@ class State:
 	# Rules must strive to preserve this definition.
 	def __compute_nodes_lookup(self):
 		''' generates __nodes from __vacancies and __trefoils '''
-		cache = { x:EMPTY_ENTRY for x in self.grid.nodes() }
+		cache = { x:PRISTINE_ENTRY for x in self.grid.nodes() }
 
 		for vacancy in self.__vacancies:
 			cache[vacancy.node] = (Vacancy, vacancy)
@@ -93,6 +93,8 @@ class State:
 	#------------------------------------------
 	# Accessors/iterators
 
+	def pristine_nodes(self): return filter(self.is_pristine, self.grid.nodes())
+
 	def vacancies(self): return self.__vacancies.values()
 
 	def nodes(self): return self.grid.nodes()
@@ -110,7 +112,7 @@ class State:
 		''' Get the layers value (an int to manipulate as a bitset) of a node.
 		0 = no vacancies, 1 or 2 = monovacancy, 3 = divacancy '''
 		(status,vacancy) = self.__nodes[node]
-		if status is Empty: return 0
+		if status is Pristine: return 0
 		elif status is Vacancy: return vacancy.layers
 		else: raise KeyError('monovacancy layers not defined at node')
 
@@ -130,23 +132,23 @@ class State:
 	# * They must be members of State so that they can modify private members.
 
 	def new_divacancy(self, node):
-		''' Turn an empty node into a divacancy. '''
+		''' Turn a pristine node into a divacancy. '''
 		self.new_vacancy(node, BOTH_LAYERS)
 
 	def new_vacancy(self, node, layers):
-		''' Turn an empty node into a mono- or divacancy. '''
+		''' Turn a pristine node into a mono- or divacancy. '''
 		node = tuple(node)
-		assert self.is_empty(node)
+		assert self.is_pristine(node)
 
 		vacancy = Vacancy(node, layers)
 		self.__vacancies.add(vacancy)
 		self.__nodes[node] = (Vacancy, vacancy)
 
 	def new_trefoil(self, nodes):
-		''' Turn three empty nodes into a trefoil. '''
+		''' Turn three pristine nodes into a trefoil. '''
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
-		assert all(map(self.is_empty, nodes))
+		assert all(map(self.is_pristine, nodes))
 
 		trefoil = Trefoil(nodes)
 		self.__trefoils.add(trefoil)
@@ -154,26 +156,26 @@ class State:
 			self.__nodes[node] = (Trefoil, trefoil)
 
 	def pop_divacancy(self, node):
-		''' Turn a divacancy into an empty node. '''
+		''' Turn a divacancy into a pristine node. '''
 		assert self.is_divacancy(node)
 		self.pop_vacancy(node)
 
 	def pop_vacancy(self, node):
-		''' Turn a mono- or divacancy into an empty node. '''
+		''' Turn a mono- or divacancy into a pristine node. '''
 		vacancy = self.__find_vacancy(node)
 		self.__vacancies.remove(vacancy)
-		self.__nodes[node] = EMPTY_ENTRY
+		self.__nodes[node] = PRISTINE_ENTRY
 		return vacancy
 
 	def pop_trefoil(self, nodes):
-		''' Turn a trefoil into three empty nodes. '''
+		''' Turn a trefoil into three pristine nodes. '''
 		nodes = frozenset(map(tuple, nodes))
 		assert len(nodes) == 3
 
 		trefoil = self.__find_trefoil(nodes)
 		self.__trefoils.remove(trefoil)
 		for node in nodes:
-			self.__nodes[node] = EMPTY_ENTRY
+			self.__nodes[node] = PRISTINE_ENTRY
 		return trefoil
 
 	def __find_vacancy(self, node):
@@ -193,38 +195,38 @@ class State:
 	def is_monovacancy(self, node):
 		''' Test that a node is a monovacancy. '''
 		tag, data = self.__nodes[node]
-		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
+		assert tag in [Pristine, Vacancy, Trefoil], 'function not updated'
 		return tag is Vacancy and data.layers in LAYERS
 
 	def is_divacancy(self, node):
 		''' Test that a node is a divacancy. '''
 		tag, data = self.__nodes[node]
-		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
+		assert tag in [Pristine, Vacancy, Trefoil], 'function not updated'
 		return tag is Vacancy and data.layers == BOTH_LAYERS
 
 	def is_vacancy(self, node):
 		''' Test that a node is a mono or divacancy. '''
 		tag, data = self.__nodes[node]
-		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
+		assert tag in [Pristine, Vacancy, Trefoil], 'function not updated'
 		return tag is Vacancy
 
 	def is_trefoil(self, node):
 		''' Test that a node is in a trefoil. '''
 		tag, data = self.__nodes[node]
-		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
+		assert tag in [Pristine, Vacancy, Trefoil], 'function not updated'
 		return tag is Trefoil
 
-	def is_empty(self, node):
+	def is_pristine(self, node):
 		''' Test that a node is pristine. (i.e. all atoms are present)'''
 		tag, data = self.__nodes[node]
-		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
-		return tag is Empty
+		assert tag in [Pristine, Vacancy, Trefoil], 'function not updated'
+		return tag is Pristine
 
 	def has_defined_layerset(self, node):
 		''' Test that a node has a well-defined set of monovacancies.
-		True for empty nodes, monovacancies and divacancies. '''
+		True for pristine nodes, monovacancies and divacancies. '''
 		tag, data = self.__nodes[node]
-		assert tag in [Empty, Vacancy, Trefoil], 'function not updated'
+		assert tag in [Pristine, Vacancy, Trefoil], 'function not updated'
 		return tag is not Trefoil
 
 

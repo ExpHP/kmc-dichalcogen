@@ -22,8 +22,6 @@ LAYERS_1 = 1
 LAYERS_2 = 2
 LAYERS_BOTH = 3
 
-def NO_OP(*a, **kw): pass
-
 from collections import namedtuple
 Vacancy = namedtuple('Vacancy', ['node', 'layers'])
 Trefoil = namedtuple('Trefoil', ['nodes'])
@@ -32,7 +30,6 @@ class State:
 
 	def __init__(self, dim):
 		self.grid = Grid(dim)
-		self.emit = NO_OP
 		self.__vacancies = set()
 		self.__trefoils = set()
 		self.__nodes = self.__compute_nodes_lookup()
@@ -41,24 +38,9 @@ class State:
 	def dim(self):
 		return self.grid.dim
 
-	def bind_events(self, event_manager):
-		'''
-		Configure the State to send update messages through an EventManager.
-
-		Can be used to enable incremental updates of objects dependent on the state.
-		'''
-		self.emit = event_manager.emit
-
 	def clone(self):
 		''' Creates a copy of the state (minus event bindings). '''
-		# Must avoid pickling the emit member as it is closed over the
-		#  listeners (and thus they will be recursively cloned)
-		# There's probably a way to structure the code to avoid storing ``emit``
-		# in State in the first place; but I just can't think about it now.
-		(tmp, self.emit) = (self.emit, NO_OP)
-		out = pickle.loads(pickle.dumps(self))
-		self.emit = tmp
-		return out
+		return pickle.loads(pickle.dumps(self))
 
 	#------------------------------------------
 	# THE __nodes CACHE:
@@ -126,22 +108,13 @@ class State:
 	# are left in a consistent state.
 
 	# General flow is:
-	# * Emit a message to objects dependent on the State.  This is done
-	#   first so they can see how the state looks before the change.
 	# * Update the primary storage (__vacancies, __trefoils)
-	# * Update the __nodes cache (this is not done via `emit` because other
-	#   objects depend on the node cache).
+	# * Update the __nodes cache.
 
 	# NOTES on implementation constraints:
 	# * These methods should be regarded as the primitive operations for
 	#   modifying the State.  Any other operations are composed of these.
 	# * They must be members of State so that they can modify private members.
-	# * They contain 'emit' calls to ensure that all composite operations
-	#   send the necessary messages.
-	# * In theory, the emit member could be removed, and another object with a
-	#   parallel set of methods could first call emit and then call these methods.
-	#   But then composite operations would have to be implemented on that object
-	#   as well; not this class.
 
 	def new_vacancy(self, node):
 		node = tuple(node)

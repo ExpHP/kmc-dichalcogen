@@ -51,12 +51,6 @@ class KmcSim:
 
 			self.rules_and_rates[rule] = rates
 
-		# Rebind events
-		event_manager = EventManager()
-		self.state.bind_events(event_manager)
-		for r in self.rules_and_rates:
-			event_manager.add_listeners_from(r)
-
 	@staticmethod
 	def __validate_kinds(rule, rates):
 		from warnings import warn
@@ -125,9 +119,13 @@ class KmcSim:
 		'''
 		affected_nodes = tuple(rule.nodes_affected_by(move))
 
-		self.state.emit('pre_status_change', self.state, affected_nodes)
+		for r in self.rules_and_rates:
+			r.pre_status_change(self.state, affected_nodes)
+
 		rule.perform(move, self.state)
-		self.state.emit('post_status_change', self.state, affected_nodes)
+
+		for r in self.rules_and_rates:
+			r.post_status_change(self.state, affected_nodes)
 
 	def validate(self):
 		'''
@@ -252,27 +250,4 @@ class Rule:
 	def clear_move(self, move):
 		assert self.move_cache.has_move(move)
 		self.move_cache.clear_all(move)
-
-VALID_EVENTS = set(['pre_status_change', 'post_status_change'])
-# alternatively we could use decorators to tag methods that are handlers
-# but then I would worry about bugs due to forgetting to tag one
-def looks_like_handler(attrname):
-	return attrname.startswith('pre_') or attrname.startswith('post_')
-class EventManager:
-	def __init__(self):
-		self.__handlers = {name:set() for name in VALID_EVENTS}
-
-	def emit(self, symbol, *args):
-		for func in self.__handlers[symbol]:
-			func(*args)
-
-	def add_listeners_from(self, obj):
-		for attr in dir(obj):
-			# eagerly assume that a handler-resembling function is one;
-			#  a KeyError beats unintentionally dead code!
-			if looks_like_handler(attr):
-				self.__handlers[attr].add(getattr(obj,attr))
-
-	def drop_all_listeners(self):
-		[s.clear() for s in self.__handlers.values()]
 

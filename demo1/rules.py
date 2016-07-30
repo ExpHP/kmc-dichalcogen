@@ -3,7 +3,7 @@ from .sim import DEFAULT_KIND
 
 # A (likely temporary) intermediate class which abstracts out a very
 # common pattern seen among the implementation of the rules.
-class InvalidationBasedRule(Rule):
+class OneKindRule(Rule):
 	def moves_dependent_on(self, state, nodes):
 		''' Get a list of moves present in the current board whose existence
 		depends on the status of at least one of the given nodes. '''
@@ -19,9 +19,28 @@ class InvalidationBasedRule(Rule):
 		for move in self.moves_dependent_on(state, nodes):
 			self.add_move(move)
 
+# FIXME A HACK because I apparently forgot when writing the above
+#       that some rules have kinds!
+class MultiKindRule(Rule):
+	def moves_dependent_on(self, state, nodes):
+		''' Get a list of moves present in the current board whose existence
+		depends on the status of at least one of the given nodes. '''
+		raise NotImplementedError
+
+	def initialize_moves(self, state):
+		for move,kind in self.moves_dependent_on(state, state.grid.nodes()):
+			self.add_move(move,kind)
+	def pre_status_change(self, state, nodes):
+		for move,kind in self.moves_dependent_on(state, nodes):
+			self.clear_move(move)
+	def post_status_change(self, state, nodes):
+		for move,kind in self.moves_dependent_on(state, nodes):
+			self.add_move(move,kind)
+
 #-------------------------------------------------------------------------
 
-class RuleCreateDivacancy(InvalidationBasedRule):
+class RuleCreateDivacancy(OneKindRule):
+	''' Permit a pristine chalcogen pair to turn directly into a divacancy. '''
 	def perform(self, node, state):
 		state.new_divacancy(node)
 
@@ -34,7 +53,8 @@ class RuleCreateDivacancy(InvalidationBasedRule):
 	def moves_dependent_on(self, state, nodes):
 		return filter(state.is_empty, nodes)
 
-class RuleFillDivacancy(InvalidationBasedRule):
+class RuleFillDivacancy(OneKindRule):
+	''' Permit a divacancy to be completely filled in one step. '''
 	def perform(self, node, state):
 		state.pop_divacancy(node)
 
@@ -47,7 +67,8 @@ class RuleFillDivacancy(InvalidationBasedRule):
 	def moves_dependent_on(self, state, nodes):
 		return filter(state.is_divacancy, nodes)
 
-class RuleMoveDivacancy(InvalidationBasedRule):
+class RuleMoveDivacancy(MultiKindRule):
+	''' Permit migration of a divacancy (as a single unit). '''
 	def perform(self, move, state):
 		(old,new) = move
 		state.pop_divacancy(old)
@@ -70,17 +91,18 @@ class RuleMoveDivacancy(InvalidationBasedRule):
 	# override to avoid an unnecessary bfs
 	def initialize_moves(self, state):
 		for node in state.grid.nodes():
-			for move in self.moves_from_node(state, node):
-				self.add_move(move)
+			for move,kind in self.moves_from_node(state, node):
+				self.add_move(move, kind)
 
 	def moves_from_node(self, state, node):
 		if state.is_divacancy(node):
 			for nbr in state.grid.neighbors(node):
 				if state.is_empty(nbr):
-					yield (node, nbr)
+					kind = DEFAULT_KIND # FIXME
+					yield ((node, nbr), kind)
 
-class RuleCreateTrefoil(InvalidationBasedRule):
-	''' Allows 3 divacancies to rotate into a trefoil defect. '''
+class RuleCreateTrefoil(OneKindRule):
+	''' Permit 3 divacancies to rotate into a trefoil defect. '''
 	def perform(self, nodes, state):
 		for node in nodes:
 			state.pop_divacancy(node)
@@ -99,8 +121,7 @@ class RuleCreateTrefoil(InvalidationBasedRule):
 			can_become_trefoil = state.is_divacancy
 
 			# find trefoil-ready groups in which at least one vertex was invalidated
-			nodes = list(filter(can_become_trefoil, nodes))
-			for node1 in nodes:
+			for node1 in filter(can_become_trefoil, nodes):
 				neighbors = state.grid.trefoil_neighbors(node1)
 				neighbors = list(filter(can_become_trefoil, neighbors))
 				for node2, node3 in combinations(neighbors, r=2):
@@ -110,8 +131,8 @@ class RuleCreateTrefoil(InvalidationBasedRule):
 		# There may be duplicates; cull them.
 		return set(inner(nodes)).__iter__()
 
-class RuleDestroyTrefoil(InvalidationBasedRule):
-	''' Allows a trefoil to rotate back into 3 garden-variety divacancies. '''
+class RuleDestroyTrefoil(OneKindRule):
+	''' Permit a trefoil to rotate back into 3 divacancies. '''
 	def perform(self, nodes, state):
 		state.pop_trefoil(nodes)
 		for node in nodes:

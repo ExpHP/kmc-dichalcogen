@@ -6,7 +6,6 @@ import sys
 import argparse
 from functools import partial
 
-from .state import State
 from .sim import KmcSim
 from . import config
 
@@ -81,11 +80,11 @@ class DevNull:
 #-----------------------------
 
 def run(ofile, nsteps, dims, config_dict, validate_every, incremental):
+	from .util import intersperse
 	import json
 
 	cfg = config.from_dict(config_dict)
-
-	init_state = State(dims)
+	init_state = cfg['state_gen_func'](dims)
 	sim = KmcSim(init_state, cfg['rule_specs'], incremental=incremental)
 
 	def maybe_do_validation(steps_done):
@@ -109,7 +108,7 @@ def run(ofile, nsteps, dims, config_dict, validate_every, incremental):
 			# incremental output
 			infos = (sim.perform_random_move() for _ in range(nsteps))
 			strs = (json.dumps(x, sort_keys=True) for x in infos)
-			for n,s in enumerate(with_separator(',\n  ', strs)):
+			for n,s in enumerate(intersperse(',\n  ', strs)):
 				ofile.write(s)
 
 				# somewhat silly HACK to recover step number
@@ -134,17 +133,6 @@ class write_enclosing:
 		self.end = end
 	def __enter__(self): self.file.write(self.start)
 	def __exit__(self, *args): self.file.write(self.end)
-
-def with_separator(separator, iterable):
-	'''
-	Turns ``[a,b,c,d,...e,f]`` into ``[a,x,b,x,...e,x,f]``.
-	'''
-	it = iter(iterable)
-	first = next(it)
-	yield first
-	for x in it:
-		yield separator
-		yield x
 
 def grid_info(dims):
 	return {

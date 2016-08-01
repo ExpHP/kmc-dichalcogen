@@ -2,9 +2,11 @@
 from __future__ import division
 
 import itertools
+import random
 import hexagonal as hex
 
 from .validate import validate_dict
+from .util import zip_exact, window2
 
 try: import cPickle as pickle
 except ImportError: import pickle
@@ -239,6 +241,68 @@ class State:
 		assert tag in [Pristine, Vacancy, Trefoil], 'function not updated'
 		return tag is not Trefoil
 
+#------------------------------------------------------------------
+
+RANDOM_MODES =  ['exact','approx']
+RANDOM_ASSIGN_FUNC = {
+	'divacancy':   lambda s,n,rng: s.new_divacancy(n),
+	'monovacancy': lambda s,n,rng: s.new_monovacancy(n, layer=rng.choice(LAYERS)),
+	'remainder':   lambda s,n,rng: None,
+}
+RANDOM_PARAMS = list(set(RANDOM_ASSIGN_FUNC) - set(['remainder']))
+
+def gen_random_state(dim, mode, params, rng=random):
+	state = State(dim)
+	__populate_state(state, mode=mode, params=params, rng=rng)
+	return state
+
+def __populate_state(state, mode, params, rng=random):
+	''' randomly populate an empty state '''
+	params = dict(params)
+	if mode == 'exact':    return __populate_state__exact(state, params, rng=rng)
+	elif mode == 'approx': return __populate_state__approx(state, params, rng=rng)
+	else: assert False, 'complete switch'
+
+# interprets each rate as a probability of occurence for each individual site
+def __populate_state__approx(state, params, rng=random):
+	from math import fsum
+	from .kmc import weighted_choice
+
+	kw_pairs = list(params.items())
+
+	remainder_prob = 1. - fsum(params.values())
+	assert remainder_prob >= (-1e-10), 'already required sum() <= 1.'
+	if remainder_prob > 0:
+		kw_pairs.append(('remainder', remainder_prob))
+
+	nodes = list(state.nodes())
+	chosen = weighted_choice(kw_pairs, howmany=len(nodes), rng=rng)
+	for (node,param) in zip_exact(nodes, chosen):
+		RANDOM_ASSIGN_FUNC[param](state, node, rng)
+
+# interprets each rate as a target frequency and tries to match them
+#  as closely as possible
+def __populate_state__exact(state, params, rng=random):
+	from .util import partial_sums, differences
+
+	nodes = list(state.nodes())
+	rng.shuffle(nodes)
+
+	# From the shuffled list, select intervals of lengths that best approximate
+	# the specified rate distribution.
+	(keys,rates) = zip(*sorted(params.items(), key=lambda kv:kv[1]))
+	cumul = partial_sums(rates, with_zero=True)
+	indices = list(round(r*len(nodes)) for r in cumul) # interval endpoints
+
+	assert all(x >= 0 for x in differences(indices)), 'tested prior to this func'
+	assert indices[-1] <= len(nodes), 'not possible through floating point error alone'
+
+	for (key,(start,end)) in zip_exact(keys, window2(indices)):
+		f = RANDOM_ASSIGN_FUNC[key]
+		for node in nodes[start:end]:
+			f(state, node, rng)
+
+#------------------------------------------------------------------
 
 # Periodic hexagonal grid, stored in axial coords.
 class Grid:

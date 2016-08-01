@@ -1,5 +1,6 @@
 
 from . import rules
+from . import state
 from .sim import RuleSpec
 from .sim import DEFAULT_KIND
 
@@ -60,7 +61,44 @@ def build_rule_spec(name, klass, rule_map):
 		init_kw=rule_map, # other fields regarded as kw args to subinit
 	)
 
-def consume__state(config): pass # FIXME stub
+def consume__state(config):
+	''' Eats 'state' section and returns a callable ``f(gridsize) -> State`` '''
+
+	d = config.pop('state', None)
+
+	# default: produce empty state
+	DEFAULT_KEY = 'random'
+	DEFAULT_SUB = {'mode':'exact'}
+
+	# NOTE: may eventually have 'path' as a mutually exclusive alternative to 'random'
+	(key,sub) = pop_mutually_exclusive(d, ['random'], default=(DEFAULT_KEY,DEFAULT_SUB))
+
+	if key == 'random': return __consume__state__random(sub)
+	else: assert False, 'complete switch'
+
+def __consume__state__random(d):
+	from functools import partial
+	mode = pop_choice(d, 'mode', state.RANDOM_MODES)
+
+	def read_rate(val):
+		if isinstance(val, str) and val.endswith('%'):
+			return float(val[:-1]) / 100
+		else: return float(val)
+
+	params = {}
+	for key in state.RANDOM_PARAMS:
+		params[key] = read_rate(d.pop(key, 0))
+
+	if any(x < 0. for x in params.values()):
+		error('negative rate', where='state.random')
+	if sum(params.values()) > 1.:
+		error('sum of rates > 100%', where='state.random')
+
+	if d:
+		msg = 'unrecognized parameter: %r\n' % (d.popitem()[0],)
+		msg += 'valid parameters are: %r' % list(state.RANDOM_PARAMS)
+		error(msg, where='state:random')
+	return partial(state.gen_random_state, mode=mode, params=params)
 
 #----------------------------------------------------------
 # helpers

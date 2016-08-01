@@ -1,5 +1,5 @@
-from bisect import bisect_left
-from random import uniform
+import random
+import bisect
 import operator
 from .util import partial_sums
 
@@ -18,7 +18,12 @@ __all__ = ['weighted_choice']
 # aforementioned "obscene hack")
 
 # weighted_choice :: [(value, weight)] -> value
-def weighted_choice(choices):
+def weighted_choice(choices, howmany=None, rng=random):
+	'''
+	A weighted random choice.
+
+	The weights do not need to add to 1.
+	'''
 
 	# Filter out zeros to unify some edge cases
 	# (namely, an empty list versus a nonempty list of zero weights)
@@ -38,7 +43,12 @@ def weighted_choice(choices):
 	assert len(cumul_weights) == len(values)
 	assert total_weight > 0. # already handled
 
-	# DO EET
-	x = uniform(0., total_weight)
-	i = bisect_left(cumul_weights, x)
-	return values[i]
+	bisect_left = bisect.bisect_left
+	uniform = rng.uniform
+	def do_eet():
+		x = uniform(0., total_weight)
+		i = bisect_left(cumul_weights, x)
+		return values[i]
+
+	if howmany is None: return do_eet()
+	else: return [do_eet() for _ in range(howmany)]

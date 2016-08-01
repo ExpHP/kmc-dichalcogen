@@ -83,3 +83,14 @@ def zip_exact(*args):
 	if any(len(x) != len(first) for x in rest):
 		raise ValueError('mismatched lengths')
 	return zip(first, *rest)
+
+def intersperse(x, iterable):
+	'''
+	Turns ``[a,b,c,d,...e,f]`` into ``[a,x,b,x,...e,x,f]``.
+	'''
+	it = iter(iterable)
+	first = next(it)
+	yield first
+	for elem in it:
+		yield x
+		yield elem

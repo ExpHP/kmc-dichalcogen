@@ -17,10 +17,9 @@ def main():
 
 	parser = argparse.ArgumentParser('python -m ' + PROG, description='')
 
-
-	parser.add_argument('CONFIG',
+	parser.add_argument('CONFIG', nargs='+',
 		type=argparse.FileType('r'),
-		help='path to config file')
+		help='paths to config files')
 
 	parser.add_argument('-d', '--dimensions', metavar='ARM,ZAG',
 		type=delim_parser(positive_int, n=2, sep=','), default=[200,200],
@@ -56,8 +55,7 @@ def main():
 	if args.debug:
 		logging.getLogger().setLevel(10)
 
-	import yaml
-	config_dict = yaml.load(args.CONFIG)
+	config_dict = config.load_all(args.CONFIG)
 
 	# bind arguments for ease of wrapping with profiler...
 	def myrun():

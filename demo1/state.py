@@ -43,7 +43,15 @@ class State:
 		self.__vacancies = set()
 		self.__trefoils = set()
 		self.__nodes = self.__compute_nodes_lookup()
-		self.__next_id = 0
+
+	@classmethod
+	def from_entity_lists(cls, dim, vacancies, trefoils):
+		self = cls(dim)
+		for (node, layer) in vacancies:
+			self.new_vacancy(node, layer)
+		for (nodes,) in trefoils:
+			self.new_trefoil(nodes)
+		return self
 
 	def dim(self):
 		return self.grid.dim
@@ -51,6 +59,29 @@ class State:
 	def clone(self):
 		''' Creates a copy of the state (minus event bindings). '''
 		return pickle.loads(pickle.dumps(self))
+
+	#------------------------------------------
+	# Serialization
+
+	@classmethod
+	def from_dict(cls, d):
+		from itertools import starmap
+		dim = tuple(d.pop('dim'))
+		if len(dim) != 2: raise ValueError
+		if not all(isinstance(x,int) for x in dim): raise ValueError
+		if not all(x>0 for x in dim): raise ValueError
+
+		vacancies = starmap(Vacancy, d.pop('vacancies'))
+		trefoils  = starmap(Trefoil, d.pop('trefoils'))
+		return cls.from_entity_lists(dim, vacancies, trefoils)
+
+	def to_dict(self):
+		return {
+			'dim': list(self.dim()),
+			'vacancies': list(map(tuple, self.vacancies())),
+			'trefoils': list(map(tuple, self.trefoils())),
+		}
+
 
 	#------------------------------------------
 	# THE __nodes CACHE:

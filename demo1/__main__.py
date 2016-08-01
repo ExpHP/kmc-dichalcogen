@@ -39,9 +39,12 @@ def main():
 		action='store_true',
 		help='display debug logs, hide standard output')
 
+	parser.add_argument('--write-initial', metavar='PATH',
+		help='write initial state to PATH')
+
 	group = parser.add_mutually_exclusive_group()
 	group.add_argument('--no-incremental',
-		action='store_true',
+		dest='incremental', action='store_false',
 		help='disable incremental updates (debugging flag)')
 
 	group.add_argument('--validate-every', metavar='NSTEP',
@@ -64,7 +67,8 @@ def main():
 			dims = args.dimensions,
 			config_dict = config_dict,
 			validate_every = args.validate_every,
-			incremental = not args.no_incremental,
+			incremental = args.incremental,
+			save_initial_path = args.write_initial,
 		)
 
 	if args.output_pstats or args.profile:
@@ -79,12 +83,17 @@ class DevNull:
 
 #-----------------------------
 
-def run(ofile, nsteps, dims, config_dict, validate_every, incremental):
+def run(ofile, nsteps, dims, config_dict, validate_every, incremental, save_initial_path):
 	from .util import intersperse
 	import json
 
 	cfg = config.from_dict(config_dict)
+
 	init_state = cfg['state_gen_func'](dims)
+	if save_initial_path:
+		with open(save_initial_path, 'w') as f:
+			json.dump(init_state.to_dict(), f)
+
 	sim = KmcSim(init_state, cfg['rule_specs'], incremental=incremental)
 
 	def maybe_do_validation(steps_done):

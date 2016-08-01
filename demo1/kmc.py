@@ -1,6 +1,7 @@
 from bisect import bisect_left
 from random import uniform
 import operator
+from .util import partial_sums
 
 __all__ = ['weighted_choice']
 
@@ -32,27 +33,12 @@ def weighted_choice(choices):
 		w,v = weights[0], values[0]
 		raise ValueError("Negative weight {!s} for {!r}".format(w,v))
 
-	cumul_weights = list(scan(operator.add, weights))
+	cumul_weights = list(partial_sums(weights, with_zero=False))
 	total_weight = cumul_weights[-1]
+	assert len(cumul_weights) == len(values)
 	assert total_weight > 0. # already handled
 
 	# DO EET
 	x = uniform(0., total_weight)
 	i = bisect_left(cumul_weights, x)
 	return values[i]
-
-def scan(function, iterable, initializer=None):
-	'''
-	Like ``reduce``, but yields partial results for each element.
-
-	Arguments have same meaning as they do for ``reduce``.
-	'''
-	iterable = iter(iterable)
-	if initializer is None:
-		a = next(iterable)
-		yield a
-	else: a = initializer
-
-	for x in iterable:
-		a = function(a, x)
-		yield a

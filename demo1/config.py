@@ -8,23 +8,25 @@ import yaml
 
 def from_dict(d):
 	if not isinstance(d, dict):
-		raise RuntimeError('config: document is not a YAML mapping')
+		error('document is not a YAML mapping')
 
 	out = {
 		'rule_specs': consume__rule_specs(d),
+		'state_gen_func':  consume__state(d),
 		# consume__other_stuff...
 	}
 	if d:
-		raise RuntimeError('config: unrecognized item: %r' % d.popitem()[0])
+		error('unrecognized section: %r' % d.popitem()[0])
 	return out
 
 def consume__rule_specs(config):
+	''' Eats 'rules' section and returns a list of RuleSpecs '''
 	def inner():
 		rules_map = pop_required(config, 'rules')
 
 		for name in list(rules_map):
 			try: klass = getattr(rules, name)
-			except KeyError: raise RuntimeError('unknown rule: %s' % name)
+			except KeyError: error('unknown rule: %s' % name)
 
 			yield build_rule_spec(name, klass, rules_map.pop(name))
 	return list(inner())
@@ -58,6 +60,8 @@ def build_rule_spec(name, klass, rule_map):
 		init_kw=rule_map, # other fields regarded as kw args to subinit
 	)
 
+def consume__state(config): pass # FIXME stub
+
 #----------------------------------------------------------
 # helpers
 
@@ -69,6 +73,19 @@ def pop_required(d, key, where=''):
 	try: return d.pop(key)
 	except KeyError:
 		error('missing required key: ' + repr(key), where)
+
+__POP_CHOICE_NO_DEFAULT = object()
+def pop_choice(d, key, choices, default=__POP_CHOICE_NO_DEFAULT, where=''):
+	choices = list(choices)
+	try: popped = d.pop(key)
+	except KeyError:
+		if default is __POP_CHOICE_NO_DEFAULT:
+			error('missing required key: ' + repr(key), where)
+		return default
+	if popped not in choices:
+		msg = 'invalid choice for %r. Choices: %s' % (key, list(choices))
+		error(msg, where)
+	return popped
 
 def pop_mutually_exclusive(d, keys, default=None, where=''):
 	def err():
@@ -99,7 +116,7 @@ def merge(left, right, path=()):
 	else:
 		if left != right:
 			pathstr = ':'.join(map(repr,path)) or 'root'
-			logging.info('config key overriden at %s\n  old: %r\n  new: %r', pathstr, left, right)
+			logging.warn('config key overriden at %s\n  old: %r\n  new: %r', pathstr, left, right)
 		return right
 
 def load_all(files):

@@ -1,4 +1,5 @@
 import logging
+import operator
 from termcolor import colored
 
 # FIXME color in here is a total hack
@@ -27,3 +28,58 @@ def format_func_call(name, args, kw):
 	sep = colored(', ', 'yellow')
 	return pat.format(name, (sep.join(argstrs + kwstrs)))
 
+def scan(function, iterable, initializer=None):
+	'''
+	Like ``reduce``, but yields partial results for each element.
+
+	Arguments have same meaning as they do for ``reduce``.
+	'''
+	iterable = iter(iterable)
+	if initializer is None:
+		a = next(iterable)
+		yield a
+	else: a = initializer
+
+	for x in iterable:
+		a = function(a, x)
+		yield a
+
+def flat(iterable):
+	'''
+	Remove one level of nesting from a nested iterable.
+	'''
+	for x in iterable:
+		yield from x
+
+def window2(iterable):
+	'''
+	Iterate over overlapping pairs of successive elements.
+	'''
+	it = iter(iterable)
+	prev = next(it)
+	for x in it:
+		yield prev, x
+		prev = x
+
+def partial_sums(iterable, zero=0, with_zero=False):
+	if with_zero:
+		iterable = flat([[zero], iterable])
+	return scan(operator.add, iterable, initializer=zero)
+
+def differences(iterable):
+	for (old,new) in window2(iterable):
+		yield new - old
+
+def zip_exact(*args):
+	'''
+	zip iterables of equal length (or error).
+
+	Warning: current implementation is not lazy and will fully traverse
+	each iterable before returning. (soz)
+	'''
+	if len(args) == 0:
+		return ()
+	first,*rest = map(list, args)
+	if any(len(x) != len(first) for x in rest):
+		raise ValueError('mismatched lengths')
+	return zip(first, *rest)

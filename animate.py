@@ -31,6 +31,9 @@ def main():
 		.format(DEFAULT_DT_FMT, DEFAULT_OFILE_PATTERN)
 		.replace('%','%%'), # argparser does its own % formatting on helpstr
 		default = DEFAULT_OFILE_PATTERN)
+	parser.add_argument('--no-metal',
+		dest='metal', action='store_false',
+		help='only show chalcogens')
 	args = parser.parse_args()
 
 	validate_output_format(args.output, parser)
@@ -40,7 +43,7 @@ def main():
 		fullinfo = json.load(f)
 
 	states = do_basic(fullinfo)
-	do_animation(states, args.output)
+	do_animation(states, args.output, args.metal)
 
 def validate_output_format(pat, parser):
 	framename = partial(pat.format, dt=datetime.datetime.now(), rand='a', dts='a')
@@ -51,13 +54,31 @@ def validate_output_format(pat, parser):
 		parser.error('Pattern is missing frame index; all output files have same name!')
 
 #----------------------------------------------------------
+# This script will replay the events in the KMC sim, using a vastly
+# simplified representation from that used in the KMC script.
 
-# This replays the events in the script, using a simplified representation.
-# (there is a high degree of coupling between this code and the original State
-#  class, which is unfortunate, but I didn't want to make such a highly specialized
-#  class available outside of the script because it bears the risk of becoming
-#  monolithic...)
-STATUS_NORMAL, STATUS_VACANCY, STATUS_TREFOIL = range(3)
+# Node format is now encoded in an integer, because trying to stick tuples of
+# unknown heterogenous types into numpy arrays only creates misery. Le sigh.
+#  * non-trefoils encode their vacant layers in the two least significant bits.
+#    0: pristine,  {1,2}: monovacancy,   3: divacancy
+#  * trefoil nodes are assigned ids from a range of integers that have a certain bit
+#    flipped.  Nodes in the same trefoil have the same id.
+FLAG_TREFOIL = 2**16
+VALUE_PRISTINE = 0
+VALUE_DIVACANCY = 3
+def iter_valid_trefoil_ids():
+	return iter(range(FLAG_TREFOIL, 2*FLAG_TREFOIL))
+
+# Vectorized testing functions
+def is_trefoil(value): return value & FLAG_TREFOIL
+def is_non_trefoil(value): return np.logical_not(is_trefoil(value))
+def is_pristine(value): return value == 0
+def is_monovacancy(value, layer=None):
+	if layer is None:
+		return (value & 1) | (value & 2)
+	else: return value & layer
+def is_divacancy(value): return value == 3
+
 def do_basic(fullinfo):
 
 	gridinfo = fullinfo['grid']
@@ -66,17 +87,16 @@ def do_basic(fullinfo):
 
 	dim = gridinfo['dim']
 	events = fullinfo['events']
+	stateinfo = fullinfo['initial_state']
 
-	def normal(layers): return (STATUS_NORMAL, layers)
-	def trefoil(nodes): return (STATUS_TREFOIL, tuple(map(tuple, nodes)))
+	trefoil_ids = iter_valid_trefoil_ids()
+	def new_trefoil_id(): return next(trefoil_ids)
 
-	# 'O,O' is an owl^H^H^H^H^H^H the data type where elements are
-	# *tuples* of two objects. Or at least, it behaves close enough,
-	# unlike ('O',2) which adds another dimension to the shape,
-	# and 'O' which fails to broadcast against your tuples when it
-	# automagically reads them as having shape (2,).
-	# Except when using np.full() because, reasons apparently.
-	state = np_full_not_retarded(dim, normal(0), dtype='O,O')
+	state = np.full(dim, VALUE_PRISTINE, dtype=np.int32)
+	for (node,layers) in stateinfo['vacancies']:
+		state[tuple(node)] = layers
+	for (nodes,) in stateinfo['trefoils']:
+		state[list(map(list, zip(*nodes)))] = new_trefoil_id()
 
 	def tfunc(state, info):
 		state = np.array(state, copy=True)
@@ -84,36 +104,32 @@ def do_basic(fullinfo):
 		move = dict(info['move'])
 		if rule == 'CreateDivacancy':
 			node, = pop_entire(move, 'node')
-			state[tuple(node)] = normal(3)
+			state[tuple(node)] = VALUE_DIVACANCY
 		elif rule == 'FillDivacancy':
 			node, = pop_entire(move, 'node')
-			state[tuple(node)] = normal(0)
+			state[tuple(node)] = VALUE_PRISTINE
 
 		elif rule == 'CreateMonovacancy':
 			node,layer = pop_entire(move, 'node', 'layer')
-			node = tuple(node)
-			assert state[node][0] is STATUS_NORMAL
-			layers = state[node][1]
-			state[node] = normal(layers | layer)
+			state[tuple(node)] |= layer
 		elif rule == 'FillMonovacancy':
 			node,layer = pop_entire(move, 'node', 'layer')
-			node = tuple(node)
-			assert state[node][0] is STATUS_NORMAL
-			layers = state[node][1]
-			state[node] = normal(layers & ~layer)
+			state[tuple(node)] &= ~layer
 
 		elif rule == 'MoveDivacancy':
 			was, now = pop_entire(move, 'was', 'now')
-			state[tuple(was)] = normal(0)
-			state[tuple(now)] = normal(3)
+			state[tuple(was)] = VALUE_PRISTINE
+			state[tuple(now)] = VALUE_DIVACANCY
 
 		elif rule == 'CreateTrefoil':
+			# indexing state with [[x1,x2,x3], [y1,y2,y3]]
 			nodes, = pop_entire(move, 'nodes')
-			# to [[x1,x2,x3], [y1,y2,y3]] for numpy's sake
-			state[list(map(list, zip(*nodes)))] = trefoil(nodes)
+			nodes = list(map(list, zip(*nodes)))
+			state[nodes] = new_trefoil_id()
 		elif rule == 'DestroyTrefoil':
 			nodes, = pop_entire(move, 'nodes')
-			state[list(map(list, zip(*nodes)))] = normal(3)
+			nodes = list(map(list, zip(*nodes)))
+			state[nodes] = VALUE_DIVACANCY
 
 		else: die('unknown rule: {!r}', rule)
 		return state
@@ -127,14 +143,9 @@ def scan(function, start, iterable):
 		acc = function(acc, x)
 		yield acc
 
-def np_full_not_retarded(shape, fillvalue, dtype):
-	arr = np.zeros(shape, dtype=dtype)
-	arr[...] = fillvalue
-	return arr
-
 #----------------------------------------------------------
 
-def do_animation(states, filepat):
+def do_animation(states, filepat, do_metal):
 	from string import ascii_letters
 	import random
 	shared_fmt = {
@@ -161,11 +172,11 @@ def do_animation(states, filepat):
 		#  something blitting")
 		fig, ax = pl.subplots()
 		ax.set_aspect('equal')
-		draw_state(ax, state)
+		draw_state(ax, state, do_metal=do_metal)
 		fig.savefig(fname)
 		pl.close(fig) # Keep relatively constant memory profile
 
-def draw_state(where, state):
+def draw_state(where, state, do_metal):
 	# ranges extended to include PBC ghost images
 	nodes = list(itertools.product(*(range(-1,d+1) for d in state.shape)))
 
@@ -174,37 +185,71 @@ def draw_state(where, state):
 	#  after the recent Haskell binge...
 
 	def pbc_reduce(node): return tuple(zip_with(op.mod, node, state.shape))
-	def status(node): return state[pbc_reduce(node)][0]
-	def has_vacancy_layers(node, layers):
-		# The following value is not actually a tuple but instead is actually
-		#  a numpy scalar value containing a tuple.  (Yes.)
-		x = state[pbc_reduce(node)]
-		# tuple(x) appears to convert it back properly, apparently because the
-		#  numpy type forwards the methods of the sequence protocol.
-		return tuple(x) == (STATUS_NORMAL, layers)
+	def filter_nodes(pred, nodes):
+		for node in nodes:
+			if pred(state[pbc_reduce(node)]):
+				yield node
 
-	normal_nodes = [x for x in nodes if has_vacancy_layers(x, 0)]
-	monovacant1_nodes = [x for x in nodes if has_vacancy_layers(x, 1)]
-	monovacant2_nodes = [x for x in nodes if has_vacancy_layers(x, 2)]
-	divacant_nodes = [x for x in nodes if has_vacancy_layers(x, 3)]
-	trefoil_nodes = [x for x in nodes if status(x) == STATUS_TREFOIL]
+	normal_nodes = list(filter_nodes(is_pristine, nodes))
+	monovacant1_nodes = list(filter_nodes(partial(is_monovacancy, layer=1), nodes))
+	monovacant2_nodes = list(filter_nodes(partial(is_monovacancy, layer=2), nodes))
+	divacant_nodes = list(filter_nodes(is_divacancy, nodes))
+	trefoil_nodes = list(filter_nodes(is_trefoil, nodes))
 
 	def is_true_node(x): return is_in_bounds(x, state.shape)
 	def is_true_edge(e): return all(map(is_true_node, e))
 
-	edges = set()
-	for node in nodes:
-		# no ghost edges beyond first ghost node
-		if not is_true_node(node): continue
-		nbrs = list(rotations_around(node, [-1, 0, 1]))
-		edges.update(tuple(sorted([node,x])) for x in nbrs)
-	edges = list(edges)
+	def no_metal_graph():
+		edges = set()
+		for node in nodes:
+			# no ghost edges beyond first ghost node
+			if not is_true_node(node): continue
+			nbrs = list(rotations_around(node, [-1, 0, 1]))
+			edges.update(tuple(sorted([node,x])) for x in nbrs)
+		edges = list(edges)
 
-	g = nx.Graph()
-	g.add_nodes_from(nodes)
-	g.add_edges_from(edges)
+		g = nx.Graph()
+		g.add_nodes_from(nodes)
+		g.add_edges_from(edges)
 
-	pos = {(a,b): hex.axialsum_to_cart(a, b, 0) for (a,b) in nodes}
+		pos = {(a,b): hex.axialsum_to_cart(a, b, 0) for (a,b) in nodes}
+		return (g, edges, pos)
+
+	def vec_add(a,b): return tuple(zip_with(op.add, a, b))
+	def with_metal_graph():
+		# FIXME this is full of disgusting hacks compared to the no-metal code
+
+		# axialsum differences from node to neighbors of cnode and mnode
+		M_NBR_DIFFS = [-1, 0, 0], [ 0,-1, 0]
+		C_NBR_DIFFS = [ 0, 1, 1], [ 1, 0, 1]
+		edges = set()
+		g = nx.Graph()
+		pos = {}
+		for node in nodes:
+			# work with nodes in axialsum format.
+			# However, when building the graph, we will leave out the sum for chalcogens
+			#  so that the filtered node lists built previously can still be used.
+			cnode = node + (0,)
+			mnode = node + (1,)
+			pos[cnode[:2]] = hex.axialsum_to_cart(*cnode)
+			pos[mnode] = hex.axialsum_to_cart(*mnode)
+
+			g.add_node(cnode[:2])
+
+			# FIXME this makes poor choices w.r.t. ghost edges for metals
+			# no ghost edges beyond first ghost node
+			if not is_true_node(node): continue
+			g.add_node(mnode)
+
+			edges.add(tuple(sorted([cnode[:2], mnode])))
+			for diff in M_NBR_DIFFS:
+				edges.add(tuple(sorted([mnode, vec_add(cnode,diff)[:2]])))
+			for diff in C_NBR_DIFFS:
+				edges.add(tuple(sorted([cnode[:2], vec_add(cnode,diff)])))
+
+		g.add_edges_from(edges)
+		return (g, edges, pos)
+	(g, edges, pos) = with_metal_graph() if do_metal else no_metal_graph()
 
 	# functions to handle ghost alpha.
 	def draw_nodes(nodelist, **kw):
@@ -216,15 +261,32 @@ def draw_state(where, state):
 		nx.draw_networkx_edges(g, edgelist=solids, ax=where, pos=pos, alpha=1, **kw)
 		nx.draw_networkx_edges(g, edgelist=ghosts, ax=where, pos=pos, alpha=GHOST_ALPHA, **kw)
 
+	# color for pristine chalcogens; white makes more sense when metals are shown,
+	#  but looks horrific when metals aren't shown.
+	maincolor = 'w' if do_metal else 'k'
 	artists = [
-		draw_nodes(normal_nodes, node_color='k', node_size=20, linewidths=1),
+		draw_nodes(normal_nodes, node_color=maincolor, node_size=20, linewidths=1),
 		draw_nodes(monovacant1_nodes, node_color='r', node_size=80, linewidths=1),
 		draw_nodes(monovacant2_nodes, node_color='b', node_size=80, linewidths=1),
 		draw_nodes(divacant_nodes, node_color='m', node_size=100, linewidths=1),
 		draw_nodes(trefoil_nodes, node_color='g', node_size=100, linewidths=1),
 		draw_edges(edges, edge_color='k', width=1),
 	]
+	if do_metal:
+		metals = [node for node in g.nodes() if len(node) == 3]
+		artists.append(draw_nodes(metals, node_color='k', node_size=20, linewidths=1))
+
+	# Bit of a HACK to fix up boundaries
+	where.set_xlim(*findlimits(pos[x][0] for x in nodes))
 	return artists
+
+def findlimits(xs, fudge=0.02):
+	xs = list(xs)
+	xmin,xmax = min(xs), max(xs)
+	width = xmax - xmin
+	xmin -= width * fudge
+	xmax += width * fudge
+	return xmin,xmax
 
 def rotations_around(node, disp):
 	for rot_disp in hex.cubic_rotations_60(*disp):

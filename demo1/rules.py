@@ -291,3 +291,6 @@ class RuleFlipMonovacancy(OneKindRule):
 
 	def moves_dependent_on(self, state, nodes):
 		return filter(state.is_monovacancy, nodes)
+
+class RuleMoveMonovacancy(MultiKindRule):
+	pass # FIXME stub

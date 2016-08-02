@@ -115,6 +115,9 @@ def do_basic(fullinfo):
 		elif rule == 'FillMonovacancy':
 			node,layer = pop_entire(move, 'node', 'layer')
 			state[tuple(node)] &= ~layer
+		elif rule == 'FlipMonovacancy':
+			node, = pop_entire(move, 'node')
+			state[tuple(node)] ^= 3
 
 		elif rule == 'MoveDivacancy':
 			was, now = pop_entire(move, 'was', 'now')

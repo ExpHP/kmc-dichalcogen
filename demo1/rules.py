@@ -273,3 +273,21 @@ class RuleFillMonovacancy(__Rule__Monovacancy):
 			layer = x.layers
 			yield ((x.node, layer, 0), 'make-double')
 
+
+class RuleFlipMonovacancy(OneKindRule):
+	''' Permit a monovacancy to move between layers. '''
+	def perform(self, node, state):
+		vacancy = state.pop_vacancy(node)
+		state.new_vacancy(node, BOTH_LAYERS & ~vacancy.layers)
+
+	def nodes_affected_by(self, node):
+		return [node]
+
+	def info(self, node):
+		return { 'node': node }
+
+	def all_moves(self, state):
+		return (vacancy.node for vacancy in state.monovacancies())
+
+	def moves_dependent_on(self, state, nodes):
+		return filter(state.is_monovacancy, nodes)

@@ -27,7 +27,7 @@ def consume__rule_specs(config):
 
 		for name in list(rules_map):
 			try: klass = getattr(rules, name)
-			except KeyError: error('unknown rule: %s' % name)
+			except AttributeError: error('unknown rule: %s' % name)
 
 			yield build_rule_spec(name, klass, rules_map.pop(name))
 	return list(inner())

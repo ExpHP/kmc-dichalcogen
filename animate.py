@@ -28,7 +28,8 @@ def main():
 		" (frame index from 0), 'rand' (a randomly generated string shared by all"
 		" images in the set), 'dt' (a datetime.datetime), and 'dts' (datetime"
 		" with a preset format {}). Default {}"
-		.format(DEFAULT_DT_FMT, DEFAULT_OFILE_PATTERN),
+		.format(DEFAULT_DT_FMT, DEFAULT_OFILE_PATTERN)
+		.replace('%','%%'), # argparser does its own % formatting on helpstr
 		default = DEFAULT_OFILE_PATTERN)
 	args = parser.parse_args()
 
@@ -66,8 +67,7 @@ def do_basic(fullinfo):
 	dim = gridinfo['dim']
 	events = fullinfo['events']
 
-	def normal(): return (STATUS_NORMAL, None)
-	def vacancy(): return (STATUS_VACANCY, None)
+	def normal(layers): return (STATUS_NORMAL, layers)
 	def trefoil(nodes): return (STATUS_TREFOIL, tuple(map(tuple, nodes)))
 
 	# 'O,O' is an owl^H^H^H^H^H^H the data type where elements are
@@ -76,30 +76,46 @@ def do_basic(fullinfo):
 	# and 'O' which fails to broadcast against your tuples when it
 	# automagically reads them as having shape (2,).
 	# Except when using np.full() because, reasons apparently.
-	state = np_full_not_retarded(dim, normal(), dtype='O,O')
+	state = np_full_not_retarded(dim, normal(0), dtype='O,O')
 
 	def tfunc(state, info):
 		state = np.array(state, copy=True)
-		action = info.pop('action')
-		if action == 'create_vacancy':
-			node, _layer = pop_entire(info, 'node', 'layer')
-			state[tuple(node)] = vacancy()
+		rule = info['rule']
+		move = dict(info['move'])
+		if rule == 'CreateDivacancy':
+			node, = pop_entire(move, 'node')
+			state[tuple(node)] = normal(3)
+		elif rule == 'FillDivacancy':
+			node, = pop_entire(move, 'node')
+			state[tuple(node)] = normal(0)
 
-		elif action == 'move_vacancy':
-			was, now = pop_entire(info, 'was', 'now')
-			state[tuple(was)] = normal()
-			state[tuple(now)] = vacancy()
+		elif rule == 'CreateMonovacancy':
+			node,layer = pop_entire(move, 'node', 'layer')
+			node = tuple(node)
+			assert state[node][0] is STATUS_NORMAL
+			layers = state[node][1]
+			state[node] = normal(layers | layer)
+		elif rule == 'FillMonovacancy':
+			node,layer = pop_entire(move, 'node', 'layer')
+			node = tuple(node)
+			assert state[node][0] is STATUS_NORMAL
+			layers = state[node][1]
+			state[node] = normal(layers & ~layer)
 
-		elif action == 'create_trefoil':
-			nodes, = pop_entire(info, 'nodes')
+		elif rule == 'MoveDivacancy':
+			was, now = pop_entire(move, 'was', 'now')
+			state[tuple(was)] = normal(0)
+			state[tuple(now)] = normal(3)
+
+		elif rule == 'CreateTrefoil':
+			nodes, = pop_entire(move, 'nodes')
 			# to [[x1,x2,x3], [y1,y2,y3]] for numpy's sake
 			state[list(map(list, zip(*nodes)))] = trefoil(nodes)
+		elif rule == 'DestroyTrefoil':
+			nodes, = pop_entire(move, 'nodes')
+			state[list(map(list, zip(*nodes)))] = normal(3)
 
-		elif action == 'destroy_trefoil':
-			nodes, = pop_entire(info, 'nodes')
-			state[list(map(list, zip(*nodes)))] = vacancy()
-
-		else: die('unknown action: {!r}', action)
+		else: die('unknown rule: {!r}', rule)
 		return state
 
 	yield state
@@ -157,11 +173,20 @@ def draw_state(where, state):
 	# Silly me was apparently stuck thinking in the functional paradigm
 	#  after the recent Haskell binge...
 
-	def pbc_reduce(node): return zip_with(op.mod, node, state.shape)
+	def pbc_reduce(node): return tuple(zip_with(op.mod, node, state.shape))
 	def status(node): return state[pbc_reduce(node)][0]
+	def has_vacancy_layers(node, layers):
+		# The following value is not actually a tuple but instead is actually
+		#  a numpy scalar value containing a tuple.  (Yes.)
+		x = state[pbc_reduce(node)]
+		# tuple(x) appears to convert it back properly, apparently because the
+		#  numpy type forwards the methods of the sequence protocol.
+		return tuple(x) == (STATUS_NORMAL, layers)
 
-	normal_nodes = [x for x in nodes if status(x) == STATUS_NORMAL]
-	vacant_nodes = [x for x in nodes if status(x) == STATUS_VACANCY]
+	normal_nodes = [x for x in nodes if has_vacancy_layers(x, 0)]
+	monovacant1_nodes = [x for x in nodes if has_vacancy_layers(x, 1)]
+	monovacant2_nodes = [x for x in nodes if has_vacancy_layers(x, 2)]
+	divacant_nodes = [x for x in nodes if has_vacancy_layers(x, 3)]
 	trefoil_nodes = [x for x in nodes if status(x) == STATUS_TREFOIL]
 
 	def is_true_node(x): return is_in_bounds(x, state.shape)
@@ -193,7 +218,9 @@ def draw_state(where, state):
 
 	artists = [
 		draw_nodes(normal_nodes, node_color='k', node_size=20, linewidths=1),
-		draw_nodes(vacant_nodes, node_color='r', node_size=100, linewidths=1),
+		draw_nodes(monovacant1_nodes, node_color='r', node_size=80, linewidths=1),
+		draw_nodes(monovacant2_nodes, node_color='b', node_size=80, linewidths=1),
+		draw_nodes(divacant_nodes, node_color='m', node_size=100, linewidths=1),
 		draw_nodes(trefoil_nodes, node_color='g', node_size=100, linewidths=1),
 		draw_edges(edges, edge_color='k', width=1),
 	]

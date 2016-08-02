@@ -277,7 +277,7 @@ class State:
 RANDOM_MODES =  ['exact','approx']
 RANDOM_ASSIGN_FUNC = {
 	'divacancy':   lambda s,n,rng: s.new_divacancy(n),
-	'monovacancy': lambda s,n,rng: s.new_monovacancy(n, layer=rng.choice(LAYERS)),
+	'monovacancy': lambda s,n,rng: s.new_vacancy(n, layers=rng.choice(LAYERS)),
 	'remainder':   lambda s,n,rng: None,
 }
 RANDOM_PARAMS = list(set(RANDOM_ASSIGN_FUNC) - set(['remainder']))

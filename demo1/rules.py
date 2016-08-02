@@ -106,7 +106,7 @@ class RuleMoveDivacancy(MultiKindRule):
 		return { 'was': old, 'now': new }
 
 	def kinds(self):
-		return [DEFAULT_KIND]
+		return list(self.KINDS)
 
 	def all_moves(self, state):
 		for x in state.divacancies():
@@ -118,10 +118,23 @@ class RuleMoveDivacancy(MultiKindRule):
 
 	def moves_from_node(self, state, node):
 		if state.is_divacancy(node):
-			for nbr in state.grid.neighbors(node):
+			for (nbr,near,far) in state.grid.neighbors_and_mutuals(node):
 				if state.is_pristine(nbr):
-					kind = DEFAULT_KIND # FIXME
+					kind = self.move_kind(state, near, far)
 					yield ((node, nbr), kind)
+
+	# Organized according to a code:
+	KINDS = [
+		'natural',
+		'missing-metal', # "left to up right"
+		'missing-comb',  # "left to down right"
+		'missing-both',  # combination thereof
+	]
+	def move_kind(self, state, near, far):
+		return self.KINDS[
+			int(state.is_divacancy(near)) + 2*int(state.is_divacancy(far))
+		]
+
 
 #-------------------------------------------------------------------------
 

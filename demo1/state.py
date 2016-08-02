@@ -381,6 +381,13 @@ class Grid:
 		for da, db, _ in hex.cubic_rotations_60(*disp):
 			yield self.reduce((a + da, b + db))
 
+	def rotations_around_threefold(self, node, disp):
+		''' Get the node at node+disp, together with the other 2 nodes
+		related to it by the threefold rotational symmetry around node. '''
+		a,b = node
+		for da, db, _ in hex.cubic_rotations_120(*disp):
+			yield self.reduce((a + da, b + db))
+
 	def can_form_trefoil(self, nodes):
 		''' Determine if the three given nodes can form a trefoil defect. '''
 		n1,n2,n3 = nodes
@@ -388,6 +395,24 @@ class Grid:
 			u in self.trefoil_neighbors(v)
 			for (u,v) in [(n1,n2), (n2,n3), (n3,n1)]
 		)
+
+	def neighbors_and_mutuals(self, node):
+		'''
+		Get (nbr,near,far) triplets of neighbors and mutual neighbors of a node.
+
+		``near`` and ``far`` are the two nodes that are mutual neighbors of ``node``
+		and ``nbr``.  They are such that ``(node, nbr, near)`` are all attached to the
+		same metal ion, and ``(node, nbr, far)`` are all on the same honeycomb cell.
+		'''
+		rotations = self.rotations_around_threefold
+		nbrs  = rotations(node, [-1,  1,  0])
+		nears = rotations(node, [ 0,  1, -1])
+		fars  = rotations(node, [-1,  0,  1])
+		yield from zip(nbrs, nears, fars)
+		nbrs  = rotations(node, [ 0,  1, -1])
+		nears = rotations(node, [-1,  1,  0])
+		fars  = rotations(node, [ 1,  0, -1])
+		yield from zip(nbrs, nears, fars)
 
 	def reduce(self, node):
 		''' Apply PBC to get a node's image in the unit cell. '''

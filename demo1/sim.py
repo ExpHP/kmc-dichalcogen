@@ -123,8 +123,10 @@ class KmcSim:
 
 		# Produce a summary of what happened.
 		return {
-			'move': dict(rule=type(rule).__name__, **rule.info(move)),
-			'rate': self.rate(rule, kind),
+			'rule': type(rule).__name__[len('Rule'):],
+			'move': rule.info(move),
+			'kind': kind,
+			'rate': self.rate(rule, kind), # FIXME could be summarized in a table beforehand
 			'total_rate': fsum(r for (_,r) in k_w_pairs),
 		}
 

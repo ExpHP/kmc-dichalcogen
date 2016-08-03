@@ -1,0 +1,24 @@
+rules:
+  CreateMonovacancy:
+    barrier:
+      from-double: 6.72584072 # VACANCY, Thermo Energy
+      make-empty:  6.72584072 # FIXME
+  FlipMonovacancy:
+    barrier:           3.41217502 # top to bottom
+  MoveMonovacancy:
+    barrier:
+      natural:         2.56175687 # isolated
+      merge-divacancy: 3.03662851 # underneath to not underneath
+      split-divacancy: 2.33673358 #    ... - thermo energy
+      swap-divacancy:  2.56175687 # FIXME
+  MoveDivacancy:
+    barrier:
+      natural:       2.25       # FIXME
+      missing-metal: 2.11199155 # Left-to-up-right
+      missing-comb:  2.52009312 # Left-to-down-right
+      missing-both:  2.25       # FIXME
+  CreateTrefoil:
+    barrier:  3.12293677  # TREFOIL, Activation energy
+  DestroyTrefoil:
+    barrier:  4.43051273  # TREFOIL, Activation energy - thermo energy
+

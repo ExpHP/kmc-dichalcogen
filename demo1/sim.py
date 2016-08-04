@@ -122,11 +122,15 @@ class KmcSim:
 		self.perform_given_move(rule, move)
 
 		# Produce a summary of what happened.
-		return {
+		d = {
 			'move': dict(rule=type(rule).__name__, **rule.info(move)),
 			'rate': self.rate(rule, kind),
 			'total_rate': fsum(r for (_,r) in k_w_pairs),
 		}
+		# FIXME bit of a hack; perhaps this shouldn't be *on* the state?
+		if self.state.is_zobrist_enabled():
+			d['zobrist'] = self.state.zobrist_key()
+		return d
 
 	def perform_given_move(self, rule, move):
 		'''

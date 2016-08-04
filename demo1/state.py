@@ -134,7 +134,7 @@ class State:
 		return True
 
 	def __validate_zobrist_key(self):
-		if self.__zobrist:
+		if self.is_zobrist_enabled():
 			expected = self.__zobrist.derive()
 			expected.update((Vacancy,x) for x in self.__vacancies)
 			expected.update((Trefoil,x) for x in self.__trefoils)
@@ -299,6 +299,10 @@ class State:
 		return tag is not Trefoil
 
 	#------------------------------------------
+	# FIXME Feels like a bit of a hack that code using State might need
+	#       to check this.
+	def is_zobrist_enabled(self):
+		return self.__zobrist is not None
 	def zobrist_key(self):
 		'''
 		Get the current value of the zobrist key, an incrementally
@@ -309,7 +313,7 @@ class State:
 		then the two will always at least agree on the hashes for states
 		visited *prior* to the ``clone``.)
 		'''
-		assert self.__zobrist, "shouldn't be called unless --zobrist is set..."
+		assert self.is_zobrist_enabled(), "shouldn't be called unless --zobrist is set..."
 		return self.__zobrist.value()
 
 #------------------------------------------------------------------

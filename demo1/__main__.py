@@ -39,8 +39,16 @@ def main():
 		action='store_true',
 		help='display debug logs, hide standard output')
 
+	parser.add_argument('-T', '--temperature',
+		type=float, default=None,
+		help='temperature in kelvin. Only meaningful if config files specify'
+		' barriers instead of rates.')
+
 	parser.add_argument('--write-initial', metavar='PATH',
 		help='write initial state to PATH')
+	parser.add_argument('--embed-initial',
+		action='store_true',
+		help='embed initial state in output')
 
 	group = parser.add_mutually_exclusive_group()
 	group.add_argument('--no-incremental',
@@ -69,6 +77,8 @@ def main():
 			validate_every = args.validate_every,
 			incremental = args.incremental,
 			save_initial_path = args.write_initial,
+			embed_initial = args.embed_initial,
+			temperature = args.temperature,
 		)
 
 	if args.output_pstats or args.profile:
@@ -83,7 +93,10 @@ class DevNull:
 
 #-----------------------------
 
-def run(ofile, nsteps, dims, config_dict, validate_every, incremental, save_initial_path):
+# The long explicit argument list is deliberate; if this thing took
+#  the 'args' object it would be impossible to lint for unused vars.
+# That said, perhaps the function needs to be broken up.
+def run(ofile, nsteps, dims, config_dict, validate_every, incremental, save_initial_path, embed_initial, temperature):
 	from .util import intersperse
 	import json
 
@@ -94,7 +107,7 @@ def run(ofile, nsteps, dims, config_dict, validate_every, incremental, save_init
 		with open(save_initial_path, 'w') as f:
 			json.dump(init_state.to_dict(), f)
 
-	sim = KmcSim(init_state, cfg['rule_specs'], incremental=incremental)
+	sim = KmcSim(init_state, cfg['rule_specs'], incremental=incremental, temperature=temperature)
 
 	def maybe_do_validation(steps_done):
 		if not validate_every: return
@@ -104,13 +117,17 @@ def run(ofile, nsteps, dims, config_dict, validate_every, incremental, save_init
 
 	# to write json incrementally we'll need to do a bit ourselves
 	with write_enclosing('{', '\n}', ofile):
-		def write_key_val(key, val, end=',\n'):
+		def write_key_val(key, val, end=',\n', pretty=True, **kw):
 			ofile.write('"%s": ' % key)
-			json.dump(val, ofile, indent=2)
+			json.dump(val, ofile, indent=2 if pretty else None, **kw)
 			ofile.write(end)
 
 		write_key_val('grid', grid_info(dims))
 		write_key_val('config', config_dict)
+		write_key_val('temperature', temperature, pretty=False)
+		write_key_val('rates', sim.rates_info(), sort_keys=True)
+		if embed_initial:
+			write_key_val('initial_state', init_state.to_dict(), pretty=False)
 
 		with write_enclosing(' "events": [\n  ', '\n ]', ofile):
 			# everything here is done with iterators for the sake of

@@ -26,15 +26,23 @@ def consume__rule_specs(config):
 		rules_map = pop_required(config, 'rules')
 
 		for name in list(rules_map):
-			try: klass = getattr(rules, name)
-			except KeyError: error('unknown rule: %s' % name)
+			try: klass = getattr(rules, 'Rule'+name)
+			except AttributeError: error('unknown rule: %s' % name)
 
-			yield build_rule_spec(name, klass, rules_map.pop(name))
+			rule_map = rules_map.pop(name)
+
+			enabled = rule_map.pop('enabled', True)
+			if not isinstance(enabled, bool): # can't trust yaml for its lax quotes and changing specs
+				error('enabled must be a boolean', where='rules:%s'%name)
+
+			if enabled:
+				yield build_rule_spec(name, klass, rule_map)
 	return list(inner())
 
 def build_rule_spec(name, klass, rule_map):
+	assert isinstance(rule_map, dict)
 	def err(msg, *args):
-		error(msg % args, where=name)
+		error(msg % args, where='rules:'+name)
 
 	# did user provide an energy barrier or a rate?
 	(map_key, the_map) = pop_mutually_exclusive(rule_map, ['barrier', 'rate'], where=name)
@@ -51,6 +59,10 @@ def build_rule_spec(name, klass, rule_map):
 	if any(x < 0 for x in the_map.values()):
 		err('negative energy barrier or rate')
 
+	# all keys have been popped
+	if rule_map:
+		err('invalid attribute: %r', next(iter(rule_map)))
+
 	# float conversion
 	the_map = {k:float(v) for (k,v) in the_map.items()}
 
@@ -64,7 +76,7 @@ def build_rule_spec(name, klass, rule_map):
 def consume__state(config):
 	''' Eats 'state' section and returns a callable ``f(gridsize) -> State`` '''
 
-	d = config.pop('state', None)
+	d = config.pop('state', {})
 
 	# default: produce empty state
 	DEFAULT_KEY = 'random'
@@ -72,6 +84,10 @@ def consume__state(config):
 
 	# NOTE: may eventually have 'path' as a mutually exclusive alternative to 'random'
 	(key,sub) = pop_mutually_exclusive(d, ['random'], default=(DEFAULT_KEY,DEFAULT_SUB))
+
+	# all keys have been popped
+	if d:
+		error('invalid attribute: {!r}'.format(next(iter(d))), where='state')
 
 	if key == 'random': return __consume__state__random(sub)
 	else: assert False, 'complete switch'
@@ -126,6 +142,7 @@ def pop_choice(d, key, choices, default=__POP_CHOICE_NO_DEFAULT, where=''):
 	return popped
 
 def pop_mutually_exclusive(d, keys, default=None, where=''):
+	assert isinstance(d, dict)
 	def err():
 		s = 'need ' + ('at most ' if default else 'exactly ')
 		s += 'one of: ' + ', '.join(map(repr,keys))

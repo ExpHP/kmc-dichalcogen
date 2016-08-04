@@ -1,7 +1,7 @@
 state:
    random:
       mode: approx
-      divacancy: 20%
+      divacancy: 0%
 rules:
 #  RuleCreateDivacancy:
 #    rate: 10.5
@@ -20,9 +20,9 @@ rules:
   RuleMoveDivacancy:
     rate:
       natural: 12.0
-      near-two: 3.0
-      near-one: 7.0
-      near-both: 7.0
+      missing-metal: 3.0
+      missing-comb:  7.0
+      missing-both:  7.0
   RuleCreateTrefoil:
     rate: 5000
   RuleDestroyTrefoil:

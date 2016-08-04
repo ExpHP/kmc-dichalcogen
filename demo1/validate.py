@@ -11,6 +11,11 @@ designed with large objects in mind. (these will just print out a single
 mismatch rather they trying to string-diff the whole thing)
 '''
 
+# For small values only (those which can be easily printed)
+def validate_equal(a, b):
+	if a != b:
+		raise AssertionError('{!r} != {!r}'.format(a, b))
+
 def validate_no_dupes(it, name='sequence', item='item'):
 	it = list(it)
 	if len(it) != len(set(it)):

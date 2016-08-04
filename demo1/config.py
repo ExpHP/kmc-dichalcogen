@@ -26,7 +26,7 @@ def consume__rule_specs(config):
 		rules_map = pop_required(config, 'rules')
 
 		for name in list(rules_map):
-			try: klass = getattr(rules, name)
+			try: klass = getattr(rules, 'Rule'+name)
 			except AttributeError: error('unknown rule: %s' % name)
 
 			rule_map = rules_map.pop(name)
@@ -40,6 +40,7 @@ def consume__rule_specs(config):
 	return list(inner())
 
 def build_rule_spec(name, klass, rule_map):
+	assert isinstance(rule_map, dict)
 	def err(msg, *args):
 		error(msg % args, where='rules:'+name)
 
@@ -75,7 +76,7 @@ def build_rule_spec(name, klass, rule_map):
 def consume__state(config):
 	''' Eats 'state' section and returns a callable ``f(gridsize) -> State`` '''
 
-	d = config.pop('state', None)
+	d = config.pop('state', {})
 
 	# default: produce empty state
 	DEFAULT_KEY = 'random'
@@ -141,6 +142,7 @@ def pop_choice(d, key, choices, default=__POP_CHOICE_NO_DEFAULT, where=''):
 	return popped
 
 def pop_mutually_exclusive(d, keys, default=None, where=''):
+	assert isinstance(d, dict)
 	def err():
 		s = 'need ' + ('at most ' if default else 'exactly ')
 		s += 'one of: ' + ', '.join(map(repr,keys))

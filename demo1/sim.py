@@ -36,11 +36,12 @@ class KmcSim:
 	and the setup of incremental update mechanisms for the various
 	components of the computation.
 	'''
-	def __init__(self, initial_state, rule_specs, incremental=True):
+	def __init__(self, initial_state, rule_specs, temperature=None, incremental=True):
 		self.state = None
 		self.rule_specs = list(rule_specs)
-		self.initialize(initial_state)
+		self.temperature = temperature
 		self.incremental = incremental
+		self.initialize(initial_state)
 
 	def initialize(self, state=None):
 		'''
@@ -58,7 +59,7 @@ class KmcSim:
 		for spec in self.rule_specs:
 			# FIXME temperature config
 			rule = spec.make_rule(self.state)
-			rates = spec.rates(temperature=300.)
+			rates = spec.rates(self.temperature)
 
 			# we can finally validate the kinds in the rule_spec now
 			#  that we have instantiated the rule...
@@ -71,13 +72,20 @@ class KmcSim:
 		from warnings import warn
 		for kind in rule.kinds():
 			if kind not in rates:
-				raise RuntimeError('config: %s: Missing required rate for kind: %s' % (type(rule).__name__, kind))
+				raise RuntimeError('config: %s: Missing required rate for kind: %s' % (rule.format(kind)))
 		for kind in rates:
 			if kind not in rule.kinds():
-				warn('config: %s: Unexpected kind: %s' % (type(rule).__name__, kind))
+				warn('config: %s: Unexpected kind: %s' % (rule.format(kind)))
 
 	def rate(self, rule, kind):
 		return self.rules_and_rates[rule][kind]
+
+	def rates_info(self):
+		d = {}
+		for (rule, rates) in self.rules_and_rates.items():
+			for (kind,rate) in rates.items():
+				d[rule.format(kind)] = rate
+		return d
 
 	def __rule_kind_counts(self):
 		from collections import Counter
@@ -123,7 +131,7 @@ class KmcSim:
 
 		# Produce a summary of what happened.
 		return {
-			'rule': type(rule).__name__[len('Rule'):],
+			'rule': rule.format(),
 			'move': rule.info(move),
 			'kind': kind,
 			'rate': self.rate(rule, kind), # FIXME could be summarized in a table beforehand
@@ -171,8 +179,10 @@ class RuleSpec:
 		from math import log
 		return -temperature_k * BOLTZMANN__eV_PER_K * log(rate)
 
-	def rates(self, temperature):
+	def rates(self, temperature=None):
 		if self.__rate_is_barrier:
+			if temperature is None:
+				raise ValueError('must specify temperature to compute rates from barrier')
 			return {
 				k:self.__rate_from_energy(v, temperature)
 				for (k,v) in self.__rates.items()
@@ -198,7 +208,7 @@ class Rule:
 		bad_kw_args = set(init_kw) - (set(args) - set(['self']))
 		if bad_kw_args:
 			raise RuntimeError('unknown property of %s: %r' %
-				(type(self).__name__, bad_kw_args.pop()))
+				(self.format(), bad_kw_args.pop()))
 		self.subinit(**init_kw)
 
 	def __compute_move_cache(self, state):
@@ -216,6 +226,11 @@ class Rule:
 	def __validate_move_cache(self, state):
 		expected = self.__compute_move_cache(state)
 		self.move_cache.validate_against(expected)
+
+	def format(self, kind=None):
+		''' Stringify name of rule, or the qualified name of a kind. '''
+		if kind is None: return type(self).__name__[len('Rule'):]
+		else: return '%s:%s' % (self.format(), kind)
 
 	def validate(self, state):
 		'''

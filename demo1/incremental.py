@@ -2,6 +2,7 @@ import random
 import numpy as np
 from collections import defaultdict, Counter
 from .validate import validate_set, validate_dict, validate_no_dupes
+from .util import memoize
 
 class IncrementalMoveCache():
 	'''
@@ -330,6 +331,63 @@ def pop_n_swap(seq, i):
 	'''
 	(seq[i], seq[-1]) = (seq[-1], seq[i]) # seems to work fine for i == -1
 	return seq.pop()
+
+class ZobristKey:
+	'''
+	An incrementalized hash of a board game state.
+
+	http://research.cs.wisc.edu/techreports/1970/TR88.pdf
+
+	The concept is simple. First, assign random values to possible (entity, position)
+	pairs.  Then the Zobrist key is the XOR sum of the values for all such pairs on
+	the board - which can be easily updated as entities are added, removed, and moved.
+	It is useful for detecting previously visited states.
+
+	This class generates the random values on demand, unless ``rng=None`` in which
+	case it will simply ``hash`` the items instead (faster, but possibly more
+	susceptible to collision).
+	'''
+	def __init__(self, values=(), bits=32, rng=random):
+		if rng: self.__genval = memoize(arg_eating_partial(rng.getrandbits, bits))
+		else:   self.__genval = hash
+		self.__current = 0
+		self.update(values)
+
+	def toggle(self, value):
+		''' Toggle the presence of an item in the hash. '''
+		self.__current ^= self.__genval(value)
+
+	def update(self, values):
+		''' Toggle the presence of many items in the hash. '''
+		for x in values:
+			self.toggle(x)
+
+	def value(self):
+		''' Get the current value of the hash. '''
+		return self.__current
+
+	def derive(self):
+		'''
+		Create a new ZobristKey which is compatible with this key;
+		i.e. it will map the same set of objects to the same hash.
+
+		No promise is made that the original and derived objects will
+		remain compatible after further updates. (however, they may
+		*happen to* in some cases, as an implementation detail)
+		'''
+		out = ZobristKey()
+		out.__genval = self.__genval
+		return out
+
+def arg_eating_partial(func, *args, **kw):
+	'''
+	``arg_eating_partial(func, x, y)`` is like ``lambda *_, **_: func(x,y)``
+	except that it actually stands a chance of being picklable without dill.
+	'''
+	from functools import partial
+	return partial(__arg_eating_partial__inner, func, args, kw)
+def __arg_eating_partial__inner(func, args, kw, *_a, **_k):
+	return func(*args, **kw)
 
 import unittest
 class ReverseDictTests(unittest.TestCase):

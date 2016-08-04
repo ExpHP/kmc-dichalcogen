@@ -1,5 +1,6 @@
 import logging
 import operator
+import functools
 from termcolor import colored
 
 # FIXME color in here is a total hack
@@ -94,3 +95,20 @@ def intersperse(x, iterable):
 	for elem in it:
 		yield x
 		yield elem
+
+def memoize(func):
+	'''
+	Decorator to memoize a function.
+
+	This caches the output of every call to the function, and returns the
+	recorded result whenever the same set of arguments are seen again.
+	'''
+	# NOTE: written this way to be picklable without dill.
+	wrapped = functools.partial(__memoize__inner, {}, func)
+	wrapped = functools.wraps(func)(wrapped)
+	return wrapped
+
+def __memoize__inner(lookup, func, *args):
+	if args not in lookup:
+		lookup[args] = func(*args)
+	return lookup[args]

@@ -5,7 +5,8 @@ import itertools
 import random
 import hexagonal as hex
 
-from .validate import validate_dict
+from .incremental import ZobristKey
+from .validate import validate_dict, validate_equal
 from .util import zip_exact, window2
 
 try: import cPickle as pickle
@@ -36,17 +37,25 @@ Trefoil = namedtuple('Trefoil', ['nodes'])
 PRISTINE = Pristine()
 PRISTINE_ENTRY = (Pristine, PRISTINE)
 
+# ``State(zobrist=HASH)`` uses ``hash`` for zobrist diffs.
+HASH = object()
+
 class State:
 
-	def __init__(self, dim):
+	def __init__(self, dim, zobrist=None):
 		self.grid = Grid(dim)
 		self.__vacancies = set()
 		self.__trefoils = set()
 		self.__nodes = self.__compute_nodes_lookup()
 
+		self.__zobrist = None
+		if isinstance(zobrist, int): self.__zobrist = ZobristKey(bits=zobrist)
+		elif zobrist is HASH:        self.__zobrist = ZobristKey(rng=None)
+		elif zobrist is not None:    raise TypeError('zobrist')
+
 	@classmethod
-	def from_entity_lists(cls, dim, vacancies, trefoils):
-		self = cls(dim)
+	def from_entity_lists(cls, dim, vacancies, trefoils, zobrist=None):
+		self = cls(dim, zobrist=zobrist)
 		for (node, layer) in vacancies:
 			self.new_vacancy(node, layer)
 		for (nodes,) in trefoils:
@@ -82,7 +91,6 @@ class State:
 			'trefoils': list(map(tuple, self.trefoils())),
 		}
 
-
 	#------------------------------------------
 	# THE __nodes CACHE:
 	# A lookup of data for individual nodes.
@@ -99,6 +107,7 @@ class State:
 		'''
 		self.__validate_entity_invariants()
 		self.__validate_nodes_lookup()
+		self.__validate_zobrist_key()
 		return True
 
 	# This function is the "gold standard" for what __nodes should look like.
@@ -122,6 +131,14 @@ class State:
 			self.__compute_nodes_lookup(),
 			name1='cached', name2='expected', key='node')
 
+		return True
+
+	def __validate_zobrist_key(self):
+		if self.is_zobrist_enabled():
+			expected = self.__zobrist.derive()
+			expected.update((Vacancy,x) for x in self.__vacancies)
+			expected.update((Trefoil,x) for x in self.__trefoils)
+			validate_equal(self.__zobrist.value(), expected.value())
 		return True
 
 	def __validate_entity_invariants(self):
@@ -166,8 +183,9 @@ class State:
 	# are left in a consistent state.
 
 	# General flow is:
-	# * Update the primary storage (__vacancies, __trefoils)
-	# * Update the __nodes cache.
+	# * Update the entity lists (__vacancies, __trefoils)
+	# * Update the __nodes table.
+	# * Update the __zobrist key.
 
 	# NOTES on implementation constraints:
 	# * These methods should be regarded as the primitive operations for
@@ -186,6 +204,7 @@ class State:
 		vacancy = Vacancy(node, layers)
 		self.__vacancies.add(vacancy)
 		self.__nodes[node] = (Vacancy, vacancy)
+		self.__zobrist_toggle((Vacancy, vacancy))
 
 	def new_trefoil(self, nodes):
 		''' Turn three pristine nodes into a trefoil. '''
@@ -197,6 +216,7 @@ class State:
 		self.__trefoils.add(trefoil)
 		for node in nodes:
 			self.__nodes[node] = (Trefoil, trefoil)
+		self.__zobrist_toggle((Trefoil, trefoil))
 
 	def pop_divacancy(self, node):
 		''' Turn a divacancy into a pristine node. '''
@@ -208,6 +228,7 @@ class State:
 		vacancy = self.__find_vacancy(node)
 		self.__vacancies.remove(vacancy)
 		self.__nodes[node] = PRISTINE_ENTRY
+		self.__zobrist_toggle((Vacancy, vacancy))
 		return vacancy
 
 	def pop_trefoil(self, nodes):
@@ -219,7 +240,12 @@ class State:
 		self.__trefoils.remove(trefoil)
 		for node in nodes:
 			self.__nodes[node] = PRISTINE_ENTRY
+		self.__zobrist_toggle((Trefoil, trefoil))
 		return trefoil
+
+	def __zobrist_toggle(self, value):
+		if self.__zobrist:
+			self.__zobrist.toggle(value)
 
 	def __find_vacancy(self, node):
 		(status,vacancy) = self.__nodes[node]
@@ -272,6 +298,24 @@ class State:
 		assert tag in [Pristine, Vacancy, Trefoil], 'function not updated'
 		return tag is not Trefoil
 
+	#------------------------------------------
+	# FIXME Feels like a bit of a hack that code using State might need
+	#       to check this.
+	def is_zobrist_enabled(self):
+		return self.__zobrist is not None
+	def zobrist_key(self):
+		'''
+		Get the current value of the zobrist key, an incrementally
+		computed hash for identifying previously visited states.
+
+		In general, zobrist keys between two different instances of State
+		are incompatible.  However, if one is ``clone``d from the other,
+		then the two will always at least agree on the hashes for states
+		visited *prior* to the ``clone``.)
+		'''
+		assert self.is_zobrist_enabled(), "shouldn't be called unless --zobrist is set..."
+		return self.__zobrist.value()
+
 #------------------------------------------------------------------
 
 RANDOM_MODES =  ['exact','approx']
@@ -282,8 +326,8 @@ RANDOM_ASSIGN_FUNC = {
 }
 RANDOM_PARAMS = list(set(RANDOM_ASSIGN_FUNC) - set(['remainder']))
 
-def gen_random_state(dim, mode, params, rng=random):
-	state = State(dim)
+def gen_random_state(dim, mode, params, rng=random, **kw):
+	state = State(dim, **kw)
 	__populate_state(state, mode=mode, params=params, rng=rng)
 	return state
 

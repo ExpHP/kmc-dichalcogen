@@ -60,6 +60,17 @@ def main():
 		help='do incremental updates, but perform an expensive validation '
 		'of all objects every NSTEP steps. (debugging flag)')
 
+	group = parser.add_mutually_exclusive_group()
+	group.add_argument('--zobrist-bits', metavar='NBITS',
+		type=positive_int, default=None,
+		help='Experimental flag. Computes and prints zobrist keys with this '
+		'many bits of randomness.')
+
+	group.add_argument('--zobrist-hash',
+		action='store_true',
+		help='Experimental flag. Computes and prints deterministic zobrist '
+		'keys using hash(). ')
+
 	args = parser.parse_args()
 
 	if args.debug:
@@ -69,6 +80,7 @@ def main():
 
 	# bind arguments for ease of wrapping with profiler...
 	def myrun():
+		from .state import HASH
 		run(
 			ofile = DevNull() if args.debug else sys.stdout,
 			nsteps = args.steps,
@@ -79,6 +91,7 @@ def main():
 			save_initial_path = args.write_initial,
 			embed_initial = args.embed_initial,
 			temperature = args.temperature,
+			zobrist = HASH if args.zobrist_hash else args.zobrist_bits,
 		)
 
 	if args.output_pstats or args.profile:
@@ -96,13 +109,13 @@ class DevNull:
 # The long explicit argument list is deliberate; if this thing took
 #  the 'args' object it would be impossible to lint for unused vars.
 # That said, perhaps the function needs to be broken up.
-def run(ofile, nsteps, dims, config_dict, validate_every, incremental, save_initial_path, embed_initial, temperature):
+def run(ofile, nsteps, dims, config_dict, validate_every, incremental, save_initial_path, embed_initial, temperature, zobrist):
 	from .util import intersperse
 	import json
 
 	cfg = config.from_dict(config_dict)
 
-	init_state = cfg['state_gen_func'](dims)
+	init_state = cfg['state_gen_func'](dims, zobrist=zobrist)
 	if save_initial_path:
 		with open(save_initial_path, 'w') as f:
 			json.dump(init_state.to_dict(), f)
